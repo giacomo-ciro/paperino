@@ -1,0 +1,10 @@
+.venv/
+uv.lock
+.python-version
+.env
+cache/
+__pycache__/
+*.logs
+
+node_modules
+dist/

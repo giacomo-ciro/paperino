@@ -1,0 +1,95 @@
+# Config file for paperino.
+# Required fields: RESEARCH.ARXIV_CAT and RESEARCH.RESEARCH_INTERESTS.
+# Everything else has a sensible default — edit only if you want to.
+
+# What to fetch, and what counts as relevant.
+[RESEARCH]
+# arXiv categories to fetch. Required: add at least one.
+# Browse the full taxonomy at https://arxiv.org/category_taxonomy
+# Examples:
+# "cs.LG",     # machine learning
+# "cs.CV",     # computer vision
+# "cs.CL",     # computation and language
+# "cs.AI",     # artificial intelligence
+# "cs.RO",     # robotics
+# "stat.ML",   # statistical ml
+# must be in quote: e.g., ARXIV_CAT=["cs.CV"]
+ARXIV_CAT = []
+# Describe your research so claude can judge relevance. Required.
+# Templated into both scoring prompts as {research_interests} — the more
+# specific, the better the filtering.
+# Example: "Incremental 3D object reconstruction from streamed point clouds
+# using transformer-based geometric primitive decoders."
+RESEARCH_INTERESTS = """
+"""
+# Papers scoring below this (on the 1-10 scale below) get only a one-line
+# mention in the digest instead of a full summary.
+MIN_SCORE = 6
+
+# Where results land.
+[OUTPUT]
+# Each run writes to <out-dir>/YYYY-MM-DD/{papers.json, digest.html}, where
+# YYYY-MM-DD is the submission window's cutoff date (UTC), not the run date.
+OUT_DIR = "~/.paperino/outputs"
+# Every run appends here (the file is never rotated). `paperino --logs` tails it.
+LOG_FILE = "~/.paperino/paperino.log"
+
+# Coarse pass: a cheap, fast model screens every fetched paper by title alone,
+# marking it 0 or 1 to decide whether it's worth the pricier fine pass below.
+# On error or malformed output, papers fail open (kept, not dropped).
+[STAGES.COARSE]
+MODEL = "haiku" # one of: fable, opus, sonnet, haiku
+CALL_SIZE = 20 # papers per claude call
+MAX_WORKERS = 10 # concurrent calls
+# Only describe the task here — the output shape (JSON keys/types) is
+# enforced separately via claude's structured-output schema (src/schemas.ts).
+# Don't add a JSON example; anything below is task instructions only.
+PROMPT = """
+You are screening newly announced arXiv papers for relevance to a research project.
+
+Project description:
+{research_interests}
+
+Below is a list of papers, one per line, formatted as "<paperId> — <title>".
+Judging from the title alone, mark each paper 1 if it could plausibly be
+relevant to the project, or 0 if it is clearly not relevant. This is a coarse
+first pass: when in doubt, keep the paper (mark it 1).
+
+Papers:
+{papers}
+"""
+
+# Fine pass: a stronger model scores every paper that passed the coarse pass,
+# reading title and abstract, on the 1-10 scale below. A failed call leaves
+# its papers unscored rather than guessing.
+[STAGES.FINE]
+MODEL = "sonnet" # one of: fable, opus, sonnet, haiku
+CALL_SIZE = 5 # papers per claude call
+MAX_WORKERS = 10 # concurrent calls
+PROMPT = """
+You are scoring newly announced arXiv papers for relevance to a research project.
+
+Project description:
+{research_interests}
+
+Score each paper below on this scale:
+- 9-10: Directly addresses the project's core problem or uses the same methods. Must-read.
+- 7-8: Closely related — same domain, complementary techniques, useful as baseline.
+- 5-6: Tangentially related — may contain reusable ideas or methods.
+- 3-4: Loosely connected — different problem but same general area.
+- 1-2: Not relevant to this specific project.
+
+Papers:
+{papers}
+"""
+
+# How paperino calls claude.
+[RUNTIME]
+# Absolute path to the claude CLI binary, used for every scoring call.
+# Auto-filled from `which claude` on first run. If that failed, run
+# `which claude` yourself and paste the result here.
+CLAUDE_BINARY = "claude"
+# Per-call timeout, in seconds.
+CALL_TIMEOUT_SECONDS = 300
+# Retries after a call fails, before giving up on it.
+CALL_RETRIES = 1
