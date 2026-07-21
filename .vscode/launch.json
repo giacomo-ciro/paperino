@@ -1,0 +1,15 @@
+{
+  "version": "0.0.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "src/cli.ts",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/tsx",
+      "program": "${workspaceFolder}/src/cli.ts",
+      "args": ["--max-papers", "1", "--force"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
