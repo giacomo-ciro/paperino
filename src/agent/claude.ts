@@ -1,4 +1,4 @@
-// trimmed from docs/blueprints/claude-wrapper.ts — see docs/plan.md for what was dropped and why.
+// based on https://github.com/kunchenguid/gnhf/blob/main/src/core/agents/claude.ts
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import type { Readable } from "node:stream";

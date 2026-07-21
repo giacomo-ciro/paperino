@@ -1,5 +1,10 @@
 <h1 align="center">paperino</h1>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@giacomo-ciro/paperino"><img src="https://img.shields.io/npm/v/@giacomo-ciro/paperino.svg?label=release&color=blue" alt="release version"></a>
+  <a href="https://www.npmjs.com/package/@giacomo-ciro/paperino"><img src="https://img.shields.io/badge/npm-%40giacomo--ciro%2Fpaperino-cb3837" alt="npm package"></a>
+</p>
+
 > Every new arXiv paper, every day, filtered by Claude Code down to what's actually worth your time.
 
 
@@ -20,9 +25,18 @@ Scanning the results then takes just 5-10 minutes, and you stay up to date with 
 ## Usage
 Paperino is a CLI utility, fully configurable via a simple .toml file. For now, it only produces an HTML digest; email delivery is coming soon.
 
-You can run it manually:
+Install it globally:
+```
+npm install -g @giacomo-ciro/paperino
+```
+
+Run it manually to produce an HTML digest locally:
 ```
 paperino
+```
+Or receive an email (coming soon, not yet implemented):
+```
+paperino --email
 ```
 
 Useful flags:
