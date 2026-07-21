@@ -5,6 +5,7 @@
   "author": "giacomo-ciro",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@11.14.0",
   "bin": {
     "paperino": "dist/cli.mjs"
   },
