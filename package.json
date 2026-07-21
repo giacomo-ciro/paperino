@@ -1,10 +1,11 @@
 {
   "name": "@giacomo-ciro/paperino",
-  "version": "0.0.0",
+  "version": "0.1.4",
   "description": "",
   "author": "giacomo-ciro",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@11.14.0",
   "bin": {
     "paperino": "dist/cli.mjs"
   },

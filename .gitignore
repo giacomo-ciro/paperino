@@ -8,4 +8,4 @@ __pycache__/
 
 node_modules
 dist/
-pnpm-*.yaml
+pnpm-workspace.yaml
