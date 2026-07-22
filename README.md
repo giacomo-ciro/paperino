@@ -12,9 +12,9 @@
   <img src="https://raw.githubusercontent.com/giacomo-ciro/paperino/main/public/paperino.png" alt="Paperino banner" width="100%">
 </p>
 
-I work on a 3D vision project. On average, ~200 new papers are published daily in the cs.CV category.
+I work on a 3D vision project. On average, ~100 new papers are published daily in the cs.CV category on [arXiv](https://arxiv.org/list/cs.CV/recent).
 
-Of those, ~40 look relevant from the title, and fewer than 5 are actually worth reading after scanning the abstract.
+Of those, <40 look relevant from the title, and <5 are actually worth reading after scanning the abstract.
 
 Existing tools based on similarity search or embeddings (Scholar Inbox, arXiv Sanity, etc.) aren't precise enough.
 
