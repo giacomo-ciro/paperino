@@ -22,13 +22,38 @@ Claude Code delivers hyper-precise filtering tailored to your exact research pro
 
 Scanning the results then takes just 5-10 minutes, and you stay up to date with the latest research.
 
-## Usage
+<!-- <p align="center">
+  <img src="https://raw.githubusercontent.com/giacomo-ciro/paperino/main/public/paperino.gif" alt="Paperino demo" width="100%">
+</p> -->
+<p align="center">
+  <img src="public/paperino.gif" alt="Paperino demo" width="100%">
+</p>
+
+## Getting Started
 Paperino is a CLI utility, fully configurable via a simple .toml file. For now, it only produces an HTML digest; email delivery is coming soon.
 
 Install it globally:
 ```
 npm install -g @giacomo-ciro/paperino
 ```
+
+### Manual Setup
+
+Configure your arXiv categories and research interests yourself:
+```
+paperino --configure    # open the config file in your default editor
+```
+
+### Quick Setup
+
+Don't want to fill in the config by hand? Let Claude do it for you:
+
+1. `cd` into the project you want papers filtered for.
+2. Paste the contents of [SETUP_PROMPT.md](./SETUP_PROMPT.md) into Claude Code.
+
+Claude will bootstrap paperino's config and fill in your arXiv categories and research summary based on your project.
+
+## Usage
 
 Run it manually to produce an HTML digest locally:
 ```
@@ -41,7 +66,6 @@ paperino --email
 
 Useful flags:
 ```
-paperino --configure    # open the config file in your default editor
 paperino --logs         # tail the log file; no pipeline run
 paperino --force        # discard the run/digest for the selected window(s) and start fresh
 paperino --only-fetch   # only fetch papers, skip the scoring pipeline
