@@ -127,10 +127,19 @@ export async function confirmRun(
   maxPapers: number | undefined,
   force: boolean,
   onlyFetch: boolean,
+  updateAvailable?: { current: string; latest: string },
 ): Promise<boolean> {
   const frame = new Frame();
 
   const lines: string[] = [];
+  if (updateAvailable) {
+    lines.push("");
+    lines.push(
+      pc.yellow(
+        `A new version of paperino is available: ${updateAvailable.current} -> ${updateAvailable.latest} (npm i -g @giacomo-ciro/paperino)`,
+      ),
+    );
+  }
   lines.push("");
   lines.push(`${windows.length} submission window(s) to process${onlyFetch ? " (only fetching)" : ""}:`);
   lines.push("");

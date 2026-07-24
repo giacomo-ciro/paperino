@@ -8,6 +8,7 @@ import { fetchRecentPapers } from "./fetch.js";
 import { makeLogger, viewLogs } from "./logger.js";
 import { confirmRun, makePipelineView, makeSilentPipelineView, type PipelineView } from "./progress.js";
 import { coarseFilter, fineScoring, type ScoringProgress } from "./scoring.js";
+import { checkForUpdateAsync, readCachedUpdate } from "./update-check.js";
 import {
   clearRunDir,
   formatUTCDate,
@@ -169,9 +170,20 @@ program
       const windows = windowsToProcess(new Date(), options.startFrom, options.windows);
       const maxPapers = options.maxPapers;
 
+      checkForUpdateAsync();
+      const latestVersion = readCachedUpdate(packageVersion);
+      const updateAvailable = latestVersion ? { current: packageVersion, latest: latestVersion } : undefined;
+
       if (
         !options.yes &&
-        !(await confirmRun(windows, cfg, maxPapers, options.force ?? false, options.onlyFetch ?? false))
+        !(await confirmRun(
+          windows,
+          cfg,
+          maxPapers,
+          options.force ?? false,
+          options.onlyFetch ?? false,
+          updateAvailable,
+        ))
       ) {
         process.stderr.write(pc.dim("aborted.\n"));
         return;
