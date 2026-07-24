@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { Command, InvalidArgumentError } from "commander";
 import pc from "picocolors";
 import { ClaudeAgent } from "./agent/claude.js";
@@ -67,6 +68,17 @@ function alreadyDoneProgress(papers: Paper[], stage: "coarse" | "fine"): Scoring
   const passed =
     stage === "coarse" ? papers.filter((p) => p.coarse === 1).length : papers.filter((p) => p.score !== undefined).length;
   return { papersDone: papers.length, papersTotal: papers.length, passed, callsDone: 0, callsTotal: 0, failed: 0 };
+}
+
+/** Open a file with the OS default handler (`open` on macOS, `xdg-open` on Linux, `start` on Windows). */
+function openInBrowser(path: string): void {
+  const [cmd, args] =
+    process.platform === "darwin"
+      ? ["open", [path]]
+      : process.platform === "win32"
+        ? ["cmd", ["/c", "start", "", path]]
+        : ["xdg-open", [path]];
+  spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
 }
 
 function renderDigestHtml(subject: string, body: string): string {
@@ -283,6 +295,10 @@ program
           process.stderr.write(`${pc.green("Done.")} ${pc.dim("Digest ready at")} ${htmlPath}\n\n`);
         }
         outputPaths.push(htmlPath);
+
+        if (!options.quiet && !options.yes) {
+          openInBrowser(htmlPath);
+        }
       }
 
       logger.pipelineEnd();
