@@ -3,13 +3,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { parse } from "smol-toml";
+import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
 import type { Config, StageConfig } from "./types.js";
 
 export const CONFIG_DIR = join(homedir(), ".paperino");
 export const CONFIG_PATH = join(CONFIG_DIR, "config.toml");
 
 const ALLOWED_MODELS = ["fable", "opus", "sonnet", "haiku"];
-const ARXIV_CATEGORY_RE = /^[a-z-]+(\.[A-Z]{2,3})?$/;
 
 function expandTilde(path: string): string {
   return path.startsWith("~") ? join(homedir(), path.slice(1)) : path;
@@ -19,7 +19,7 @@ function templatePath(): string {
   return new URL("./bootstrap-config.toml", import.meta.url).pathname;
 }
 
-function detectClaudeBinary(): string | null {
+export function detectClaudeBinary(): string | null {
   try {
     const resolved = execFileSync("which", ["claude"], { encoding: "utf-8" }).trim();
     return resolved || null;
@@ -115,11 +115,11 @@ class ConfigErrorCollector {
     }
   }
 
-  /** Every arXiv category must look like "cs.LG" or "stat" (see https://arxiv.org/category_taxonomy). */
+  /** Every arXiv category must be a real category from the taxonomy (see https://arxiv.org/category_taxonomy). */
   arxivCategories(value: string[], label: string): void {
     for (const cat of value) {
-      if (!ARXIV_CATEGORY_RE.test(cat)) {
-        this.add(`"${label}" contains "${cat}", which doesn't look like an arXiv category (e.g. "cs.LG")`);
+      if (!ARXIV_CATEGORY_CODES.has(cat)) {
+        this.add(`"${label}" contains "${cat}", which isn't a real arXiv category (e.g. "cs.LG") — see https://arxiv.org/category_taxonomy`);
       }
     }
   }

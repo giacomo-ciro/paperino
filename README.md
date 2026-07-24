@@ -37,21 +37,10 @@ Install it globally:
 npm install -g @giacomo-ciro/paperino
 ```
 
-### Manual Setup
-
-Configure your arXiv categories and research interests yourself:
+Set it up:
 ```
-paperino --configure    # open the config file in your default editor
+paperino --init    # walks you through setup with a few questions
 ```
-
-### Quick Setup
-
-Don't want to fill in the config by hand? Let Claude do it for you:
-
-1. `cd` into the project you want papers filtered for.
-2. Paste the contents of [SETUP_PROMPT.md](./SETUP_PROMPT.md) into Claude Code.
-
-Claude will bootstrap paperino's config and fill in your arXiv categories and research summary based on your project.
 
 ## Usage
 
@@ -64,13 +53,16 @@ Or receive an email (coming soon, not yet implemented):
 paperino --email
 ```
 
-Useful flags:
+Some examples:
 ```
-paperino --logs         # tail the log file; no pipeline run
-paperino --force        # discard the run/digest for the selected window(s) and start fresh
-paperino --only-fetch   # only fetch papers, skip the scoring pipeline
-paperino --quiet        # suppress progress output; print only the digest path
-paperino -y             # skip the confirmation prompt and run immediately
+paperino --configure                     # open the config file in your default editor
+paperino --logs                          # tail the log file; no pipeline run
+paperino --force                         # discard the run/digest for the selected window(s) and start fresh
+paperino --only-fetch                    # only fetch papers, skip the scoring pipeline
+paperino --start-from 3                  # run on the window from 3 windows ago instead of the most recent
+paperino --start-from 3 --windows 3      # catch up on the last 3 windows, oldest of which starts 3 windows back
+paperino --max-papers 50                 # cap each window at 50 papers (most recently submitted first)
+paperino -y --quiet                      # skip the confirmation prompt and only print the digest path — what a cron job wants
 ```
 
 Or, as I do, run every weekday at 9:30 AM. Open the crontab:

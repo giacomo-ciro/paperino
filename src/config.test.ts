@@ -141,6 +141,17 @@ describe("loadConfig", () => {
     expect(() => loadConfig(configPath)).toThrow(/ARXIV_CAT/);
   });
 
+  it("fails loudly when an ARXIV_CAT entry is a bare archive with no real subcategory (e.g. \"stat\")", () => {
+    writeFileSync(configPath, VALID_TOML.replace('ARXIV_CAT = ["cs.CV"]', 'ARXIV_CAT = ["stat"]'), "utf-8");
+    expect(() => loadConfig(configPath)).toThrow(/ARXIV_CAT/);
+  });
+
+  it("accepts a bare category code that is itself a real leaf taxonomy entry (e.g. \"quant-ph\")", () => {
+    writeFileSync(configPath, VALID_TOML.replace('ARXIV_CAT = ["cs.CV"]', 'ARXIV_CAT = ["quant-ph"]'), "utf-8");
+    const config = loadConfig(configPath);
+    expect(config.arxivCat).toEqual(["quant-ph"]);
+  });
+
   it("fails loudly when a stage PROMPT is missing a placeholder", () => {
     writeFileSync(
       configPath,

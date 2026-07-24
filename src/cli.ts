@@ -6,6 +6,7 @@ import { ClaudeAgent } from "./agent/claude.js";
 import { CONFIG_PATH, ensureConfig, loadConfig, openConfigInEditor } from "./config.js";
 import { buildDigest } from "./digest.js";
 import { fetchRecentPapers } from "./fetch.js";
+import { runInit } from "./init.js";
 import { makeLogger, viewLogs } from "./logger.js";
 import { confirmRun, makePipelineView, makeSilentPipelineView, type PipelineView } from "./progress.js";
 import { coarseFilter, fineScoring, type ScoringProgress } from "./scoring.js";
@@ -114,6 +115,11 @@ program
     false,
   )
   .option(
+    "--init",
+    "interactively set up ~/.paperino/config.toml. Run this first.",
+    false,
+  )
+  .option(
     "--logs",
     "page through the log file with less; no pipeline run.",
     false
@@ -149,6 +155,7 @@ program
   .action(
     async (options: {
       configure?: boolean;
+      init?: boolean;
       logs?: boolean;
       email?: boolean;
       startFrom: number;
@@ -161,6 +168,11 @@ program
     }) => {
       if (options.email) {
         throw new Error("email delivery is not implemented yet");
+      }
+
+      if (options.init) {
+        await runInit();
+        return;
       }
 
       ensureConfig();
