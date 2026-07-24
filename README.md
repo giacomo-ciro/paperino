@@ -9,7 +9,7 @@
 
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/giacomo-ciro/paperino/main/public/paperino.png" alt="Paperino banner" width="100%">
+  <img src="https://raw.githubusercontent.com/giacomo-ciro/paperino/main/public/paperino.jpg" alt="Paperino banner" width="100%">
 </p>
 
 I work on a 3D vision project. On average, ~100 new papers are published daily in the cs.CV category on [arXiv](https://arxiv.org/list/cs.CV/recent).
