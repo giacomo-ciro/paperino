@@ -27,7 +27,7 @@ Scanning the results then takes just 5-10 minutes, and you stay up to date with 
 </p>
 
 ## Getting Started
-Paperino is a CLI utility, fully configurable via a simple .toml file. For now, it only produces an HTML digest; email delivery is coming soon.
+Paperino is a CLI utility, fully configurable via a simple .toml file. It produces an HTML digest locally and can email it through Gmail.
 
 Install it globally:
 ```
@@ -36,7 +36,7 @@ npm install -g @giacomo-ciro/paperino
 
 Set it up:
 ```
-paperino --init    # walks you through setup with a few questions
+paperino --configure    # walks you through setup with a few questions
 ```
 
 ## Usage
@@ -45,20 +45,22 @@ Run it manually to produce an HTML digest locally:
 ```
 paperino
 ```
-Or receive an email (coming soon, not yet implemented):
+Or email the digest to the configured recipient:
 ```
 paperino --email
 ```
+Email delivery uses the Gmail sender account and Google app password collected by `paperino --configure`. Setup sends a test email and asks you to confirm receipt before enabling delivery. It requires [2-Step Verification and an app password](https://support.google.com/mail/answer/185833?hl=en). The sender account routes the email; the recipient can be any address. The app password is stored as plain text in `~/.paperino/config.toml`.
 
 Some examples:
 ```
-paperino --configure                     # open the config file in your default editor
+paperino --configure                     # interactively configure paperino
 paperino --logs                          # tail the log file; no pipeline run
 paperino --force                         # discard the run/digest for the selected announcement(s) and start fresh
 paperino --only-fetch                    # only fetch papers, skip the scoring pipeline
+paperino --email                         # email each completed digest to the configured recipient
 paperino --last 3                        # catch up on the latest 3 arXiv announcements
 paperino --max-papers 50                 # cap each announcement at 50 papers (most recently submitted first)
-paperino -y --quiet                      # skip the confirmation prompt and only print the digest path — what a cron job wants
+paperino --quiet                         # run non-interactively and only print the digest path — what a cron job wants
 ```
 
 Or, as I do, run every weekday at 9:30 AM. Open the crontab:
@@ -68,7 +70,7 @@ crontab -e
 and add:
 ```bash
 # minute 30, hour 9, Mon-Fri
-30 9 * * 1-5 paperino -y --quiet
+30 9 * * 1-5 paperino --quiet --email
 ```
 > **Note:** arXiv announces new submissions at 20:00 ET on Sun/Mon/Tue/Wed/Thu. Running at 9:30 AM CET (3:30 ET) ensures the run always lands after the prior evening's announcement, catching all five announcements without needing to run on weekends.
 

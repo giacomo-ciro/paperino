@@ -27,6 +27,12 @@ export interface StageConfig {
   prompt: string;
 }
 
+export interface EmailConfig {
+  senderAddress: string;
+  recipientAddress: string;
+  appPassword: string;
+}
+
 export interface Config {
   claudeBinary: string;
   arxivCat: string[];
@@ -39,7 +45,7 @@ export interface Config {
   callRetries: number; // retries after the first attempt (config: RUNTIME.CALL_RETRIES)
   coarse: StageConfig; // title-only screening pass; coarse.prompt drives it
   fine: StageConfig; // title+abstract scoring pass; fine.prompt drives it
-  // NOTE: no email.* keys in this port — email is deferred.
+  email?: EmailConfig; // absent when [EMAIL] is left empty
 }
 
 export type JsonSchema = Record<string, unknown>;

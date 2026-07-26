@@ -1,16 +1,17 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { parse } from "smol-toml";
 import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
 import { checkWritableDir } from "./store.js";
-import type { Config, StageConfig } from "./types.js";
+import type { Config, EmailConfig, StageConfig } from "./types.js";
 
 export const CONFIG_DIR = join(homedir(), ".paperino");
 export const CONFIG_PATH = join(CONFIG_DIR, "config.toml");
 
 const ALLOWED_MODELS = ["fable", "opus", "sonnet", "haiku"];
+const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function expandTilde(path: string): string {
   return path.startsWith("~") ? join(homedir(), path.slice(1)) : path;
@@ -140,6 +141,12 @@ class ConfigErrorCollector {
     }
   }
 
+  emailAddress(value: string, label: string): void {
+    if (value !== "" && !EMAIL_ADDRESS_RE.test(value)) {
+      this.add(`"${label}" must be a valid email address`);
+    }
+  }
+
   /** Every arXiv category must be a real category from the taxonomy (see https://arxiv.org/category_taxonomy). */
   arxivCategories(value: string[], label: string): void {
     for (const cat of value) {
@@ -168,7 +175,7 @@ class ConfigErrorCollector {
     return value as Record<string, unknown>;
   }
 
-  stage(stages: Record<string, unknown>, key: string, label: string): StageConfig {
+  stage(stages: Record<string, unknown>, key: string, label: string, maxWorkers: number): StageConfig {
     const stage = this.table(stages, key, label);
 
     const model = this.nonEmptyString(stage, "MODEL", `${label}.MODEL`);
@@ -176,9 +183,6 @@ class ConfigErrorCollector {
 
     const callSize = this.number(stage, "CALL_SIZE", `${label}.CALL_SIZE`);
     this.numberSatisfies(callSize, `${label}.CALL_SIZE`, (n) => n > 0, "must be a positive number");
-
-    const maxWorkers = this.number(stage, "MAX_WORKERS", `${label}.MAX_WORKERS`);
-    this.numberSatisfies(maxWorkers, `${label}.MAX_WORKERS`, (n) => n > 0, "must be a positive number");
 
     const prompt = this.nonEmptyString(stage, "PROMPT", `${label}.PROMPT`);
     this.promptHasPlaceholders(prompt, `${label}.PROMPT`);
@@ -192,7 +196,7 @@ class ConfigErrorCollector {
     }
     const list = this.errors.map((e) => `  - ${e}`).join("\n");
     throw new Error(
-      `Config error(s) in ${configPath} (run --configure to edit):\n${list}`,
+      `Config error(s) in ${configPath} (run --configure to update it):\n${list}`,
     );
   }
 }
@@ -207,6 +211,7 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
   const research = errors.table(table, "RESEARCH");
   const output = errors.table(table, "OUTPUT");
   const stages = errors.table(table, "STAGES");
+  const emailTable = table.EMAIL;
 
   const callTimeoutSeconds = errors.number(runtime, "CALL_TIMEOUT_SECONDS", "RUNTIME.CALL_TIMEOUT_SECONDS");
   errors.numberSatisfies(
@@ -218,6 +223,16 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
 
   const callRetries = errors.number(runtime, "CALL_RETRIES", "RUNTIME.CALL_RETRIES");
   errors.numberSatisfies(callRetries, "RUNTIME.CALL_RETRIES", (n) => n >= 0, "must be zero or a positive number");
+
+  let maxWorkers: number;
+  if (typeof runtime.MAX_WORKERS === "number") {
+    maxWorkers = runtime.MAX_WORKERS;
+    errors.numberSatisfies(maxWorkers, "RUNTIME.MAX_WORKERS", (n) => n > 0, "must be a positive number");
+  } else {
+    const legacyCoarse = errors.table(stages, "COARSE", "STAGES.COARSE");
+    maxWorkers = errors.number(legacyCoarse, "MAX_WORKERS", "STAGES.COARSE.MAX_WORKERS");
+    errors.numberSatisfies(maxWorkers, "STAGES.COARSE.MAX_WORKERS", (n) => n > 0, "must be a positive number");
+  }
 
   const arxivCat = errors.nonEmptyStringArray(research, "ARXIV_CAT", "RESEARCH.ARXIV_CAT");
   errors.arxivCategories(arxivCat, "RESEARCH.ARXIV_CAT");
@@ -237,6 +252,28 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
   errors.absolutePath(logFile, "OUTPUT.LOG_FILE");
   errors.writableDir(dirname(logFile), "OUTPUT.LOG_FILE");
 
+  let email: EmailConfig | undefined;
+  if (emailTable !== undefined) {
+    if (typeof emailTable !== "object" || emailTable === null) {
+      errors.add('"[EMAIL]" must be a table');
+    } else {
+      const table = emailTable as Record<string, unknown>;
+      const senderAddress = errors.string(table, "SENDER_ADDRESS", "EMAIL.SENDER_ADDRESS");
+      const recipientAddress = errors.string(table, "RECIPIENT_ADDRESS", "EMAIL.RECIPIENT_ADDRESS");
+      const appPassword = errors.string(table, "APP_PASSWORD", "EMAIL.APP_PASSWORD");
+      const configured = [senderAddress, recipientAddress, appPassword].some((value) => value !== "");
+
+      if (configured) {
+        if (senderAddress === "") errors.add('"EMAIL.SENDER_ADDRESS" is empty');
+        if (recipientAddress === "") errors.add('"EMAIL.RECIPIENT_ADDRESS" is empty');
+        if (appPassword === "") errors.add('"EMAIL.APP_PASSWORD" is empty');
+        errors.emailAddress(senderAddress, "EMAIL.SENDER_ADDRESS");
+        errors.emailAddress(recipientAddress, "EMAIL.RECIPIENT_ADDRESS");
+        email = { senderAddress, recipientAddress, appPassword };
+      }
+    }
+  }
+
   const config: Config = {
     claudeBinary: errors.nonEmptyString(runtime, "CLAUDE_BINARY", "RUNTIME.CLAUDE_BINARY"),
     callTimeoutMs: callTimeoutSeconds * 1000,
@@ -247,27 +284,12 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
     cacheDir,
     outDir,
     logFile,
-    coarse: errors.stage(stages, "COARSE", "STAGES.COARSE"),
-    fine: errors.stage(stages, "FINE", "STAGES.FINE"),
+    email,
+    coarse: errors.stage(stages, "COARSE", "STAGES.COARSE", maxWorkers),
+    fine: errors.stage(stages, "FINE", "STAGES.FINE", maxWorkers),
   };
 
   errors.throwIfAny(configPath);
 
   return config;
-}
-
-/** Open the config file in the user's editor, falling back to `vi`. */
-export function openConfigInEditor(configPath: string = CONFIG_PATH): void {
-  const candidates = [process.env.VISUAL, process.env.EDITOR, "vi"].filter(
-    (c): c is string => !!c,
-  );
-
-  for (const editor of candidates) {
-    const result = spawnSync(editor, [configPath], { stdio: "inherit" });
-    if (!result.error && result.status === 0) {
-      return;
-    }
-  }
-
-  process.stdout.write(`Could not open an editor. Edit the config file yourself: ${configPath}\n`);
 }

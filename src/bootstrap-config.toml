@@ -38,13 +38,21 @@ CACHE_DIR = "~/.paperino/cache"
 # Every run appends here (the file is never rotated). `paperino --logs` tails it.
 LOG_FILE = "~/.paperino/paperino.log"
 
+# Optional Gmail delivery. `paperino --email` sends each completed digest from
+# SENDER_ADDRESS to RECIPIENT_ADDRESS. Generate APP_PASSWORD at
+# https://myaccount.google.com/apppasswords after enabling 2-Step Verification.
+# It is stored here as plain text: keep this file private (for example, chmod 600).
+[EMAIL]
+SENDER_ADDRESS = ""
+RECIPIENT_ADDRESS = ""
+APP_PASSWORD = ""
+
 # Coarse pass: a cheap, fast model screens every fetched paper by title alone,
 # marking it 0 or 1 to decide whether it's worth the pricier fine pass below.
 # On error or malformed output, papers fail open (kept, not dropped).
 [STAGES.COARSE]
 MODEL = "haiku" # one of: fable, opus, sonnet, haiku
 CALL_SIZE = 20 # papers per claude call
-MAX_WORKERS = 10 # concurrent calls
 # Only describe the task here — the output shape (JSON keys/types) is
 # enforced separately via claude's structured-output schema (src/schemas.ts).
 # Don't add a JSON example; anything below is task instructions only.
@@ -69,7 +77,6 @@ Papers:
 [STAGES.FINE]
 MODEL = "sonnet" # one of: fable, opus, sonnet, haiku
 CALL_SIZE = 5 # papers per claude call
-MAX_WORKERS = 10 # concurrent calls
 PROMPT = """
 You are scoring newly announced arXiv papers for relevance to a research project.
 
@@ -97,3 +104,5 @@ CLAUDE_BINARY = "claude"
 CALL_TIMEOUT_SECONDS = 300
 # Retries after a call fails, before giving up on it.
 CALL_RETRIES = 1
+# Maximum concurrent Claude calls in either scoring stage.
+MAX_WORKERS = 10

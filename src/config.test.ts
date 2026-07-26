@@ -23,6 +23,7 @@ const VALID_TOML = `
 CLAUDE_BINARY = "/usr/local/bin/claude"
 CALL_TIMEOUT_SECONDS = 300
 CALL_RETRIES = 1
+MAX_WORKERS = 10
 
 [RESEARCH]
 ARXIV_CAT = ["cs.CV"]
@@ -37,13 +38,11 @@ LOG_FILE = "~/.paperino/paperino.log"
 [STAGES.COARSE]
 MODEL = "haiku"
 CALL_SIZE = 20
-MAX_WORKERS = 10
 PROMPT = "prompt with {research_interests} and {papers}"
 
 [STAGES.FINE]
 MODEL = "sonnet"
 CALL_SIZE = 5
-MAX_WORKERS = 10
 PROMPT = "prompt with {research_interests} and {papers}"
 `;
 
@@ -70,6 +69,73 @@ describe("loadConfig", () => {
       maxWorkers: 10,
       prompt: "prompt with {research_interests} and {papers}",
     });
+    expect(config.email).toBeUndefined();
+  });
+
+  it("uses RUNTIME.MAX_WORKERS for both scoring stages", () => {
+    writeFileSync(configPath, VALID_TOML.replace("MAX_WORKERS = 10", "MAX_WORKERS = 3"), "utf-8");
+    const config = loadConfig(configPath);
+
+    expect(config.coarse.maxWorkers).toBe(3);
+    expect(config.fine.maxWorkers).toBe(3);
+  });
+
+  it("loads optional Gmail email delivery settings", () => {
+    writeFileSync(
+      configPath,
+      VALID_TOML.replace(
+        "[STAGES.COARSE]",
+        `[EMAIL]
+SENDER_ADDRESS = "sender@gmail.com"
+RECIPIENT_ADDRESS = "digest@example.com"
+APP_PASSWORD = "abcdefghijklmnop"
+
+[STAGES.COARSE]`,
+      ),
+      "utf-8",
+    );
+
+    expect(loadConfig(configPath).email).toEqual({
+      senderAddress: "sender@gmail.com",
+      recipientAddress: "digest@example.com",
+      appPassword: "abcdefghijklmnop",
+    });
+  });
+
+  it("rejects incomplete email delivery settings", () => {
+    writeFileSync(
+      configPath,
+      VALID_TOML.replace(
+        "[STAGES.COARSE]",
+        `[EMAIL]
+SENDER_ADDRESS = "sender@gmail.com"
+RECIPIENT_ADDRESS = ""
+APP_PASSWORD = "abcdefghijklmnop"
+
+[STAGES.COARSE]`,
+      ),
+      "utf-8",
+    );
+
+    expect(() => loadConfig(configPath)).toThrow(/EMAIL\.RECIPIENT_ADDRESS.*empty/);
+  });
+
+  it("rejects malformed sender and recipient email addresses", () => {
+    writeFileSync(
+      configPath,
+      VALID_TOML.replace(
+        "[STAGES.COARSE]",
+        `[EMAIL]
+SENDER_ADDRESS = "not-an-email"
+RECIPIENT_ADDRESS = "also-not-an-email"
+APP_PASSWORD = "abcdefghijklmnop"
+
+[STAGES.COARSE]`,
+      ),
+      "utf-8",
+    );
+
+    expect(() => loadConfig(configPath)).toThrow(/EMAIL\.SENDER_ADDRESS.*valid email address[\s\S]*EMAIL\.RECIPIENT_ADDRESS.*valid email address/);
   });
 
   it("expands ~ in OUT_DIR", () => {

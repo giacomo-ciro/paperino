@@ -3,10 +3,11 @@ import { spawn } from "node:child_process";
 import { Command, InvalidArgumentError } from "commander";
 import pc from "picocolors";
 import { ClaudeAgent } from "./agent/claude.js";
-import { CONFIG_PATH, ensureConfig, loadConfig, openConfigInEditor } from "./config.js";
+import { ensureConfig, loadConfig } from "./config.js";
 import { buildDigest } from "./digest.js";
+import { sendDigestEmail } from "./email.js";
 import { fetchRecentPapers } from "./fetch.js";
-import { runInit } from "./init.js";
+import { runConfigure } from "./configure.js";
 import { makeLogger, viewLogs } from "./logger.js";
 import { confirmRun, makePipelineView, makeSilentPipelineView, type PipelineView } from "./progress.js";
 import { coarseFilter, fineScoring, type ScoringProgress } from "./scoring.js";
@@ -101,22 +102,17 @@ program
   .version(packageVersion)
   .option(
     "--configure",
-    `open ${CONFIG_PATH} in your default editor.`,
+    "interactively configure paperino.",
     false
   )
   .option(
     "--email",
-    "get the digest directly to your inbox (coming soon).",
+    "email each completed digest to the configured recipient.",
     false,
   )
   .option(
     "--force",
     "discard any existing run/digest for the selected announcements and rerun from scratch.",
-    false,
-  )
-  .option(
-    "--init",
-    "interactively set up ~/.paperino/config.toml. Run this first.",
     false,
   )
   .option(
@@ -136,7 +132,7 @@ program
   )
   .option(
     "--quiet",
-    "suppress progress output; only print the path to the output file.",
+    "run non-interactively: no confirmation prompt, no progress output, no browser; only print the path to the output file.",
     false,
   )
   .option(
@@ -145,11 +141,9 @@ program
     parsePositiveInteger,
     1,
   )
-  .option("-y, --yes", "skip the confirmation prompt and run immediately.", false)
   .action(
     async (options: {
       configure?: boolean;
-      init?: boolean;
       logs?: boolean;
       email?: boolean;
       last: number;
@@ -157,25 +151,24 @@ program
       onlyFetch?: boolean;
       force?: boolean;
       quiet?: boolean;
-      yes?: boolean;
     }) => {
-      if (options.email) {
-        throw new Error("email delivery is not implemented yet");
-      }
-
-      if (options.init) {
-        await runInit();
+      if (options.configure) {
+        await runConfigure();
         return;
       }
 
       ensureConfig();
 
-      if (options.configure) {
-        openConfigInEditor();
-        return;
+      const cfg = loadConfig();
+      const email = options.email ? cfg.email : undefined;
+
+      if (options.email && !email) {
+        throw new Error("email delivery is not configured — run paperino --configure");
       }
 
-      const cfg = loadConfig();
+      if (options.email && options.onlyFetch) {
+        throw new Error("--email cannot be used with --only-fetch because no digest is generated");
+      }
 
       if (options.logs) {
         viewLogs(cfg.logFile);
@@ -192,7 +185,7 @@ program
       const updateAvailable = latestVersion ? { current: packageVersion, latest: latestVersion } : undefined;
 
       if (
-        !options.yes &&
+        !options.quiet &&
         !(await confirmRun(
           announcements,
           cfg,
@@ -292,6 +285,14 @@ program
 
         const { subject, body } = buildDigest(papers, announcedAt, cfg.minScore);
         const htmlPath = writeDigest(cfg.outDir, announcedAt, renderDigestHtml(subject, body));
+        if (email) {
+          try {
+            await sendDigestEmail(email, subject, body);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`email delivery failed; digest remains at ${htmlPath}: ${message}`);
+          }
+        }
         const announcementFailed = coarseProgress.failed > 0 || fineProgress.failed > 0;
         if (announcementFailed) {
           hadFailures = true;
@@ -299,15 +300,21 @@ program
           if (!options.quiet) {
             process.stderr.write(
               `${pc.yellow("⚠ Done with errors.")} ${pc.dim(`Digest may be incomplete: ${failedCalls} call(s) failed. Run`)} paperino --logs ${pc.dim("for details.")}\n` +
-                `${pc.dim("Digest ready at")} ${htmlPath}\n\n`,
+                `${pc.dim("Digest ready at")} ${htmlPath}\n`,
             );
           }
         } else if (!options.quiet) {
-          process.stderr.write(`${pc.green("Done.")} ${pc.dim("Digest ready at")} ${htmlPath}\n\n`);
+          process.stderr.write(`${pc.green("Done.")} ${pc.dim("Digest ready at")} ${htmlPath}\n`);
+        }
+        if (email && !options.quiet) {
+          process.stderr.write(`${pc.green("Email successfully sent.")} ${pc.dim("Delivered to")} ${email.recipientAddress}\n`);
+        }
+        if (!options.quiet) {
+          process.stderr.write("\n");
         }
         outputPaths.push(htmlPath);
 
-        if (!options.quiet && !options.yes) {
+        if (!options.quiet) {
           openInBrowser(htmlPath);
         }
       }
