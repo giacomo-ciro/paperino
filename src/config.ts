@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { parse } from "smol-toml";
 import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
 import { checkWritableDir } from "./store.js";
+import { patchTomlValue, removeTomlValue, type TomlValue } from "./toml.js";
 import type { Config, EmailConfig, StageConfig } from "./types.js";
 
 export const CONFIG_DIR = join(homedir(), ".paperino");
@@ -21,6 +22,29 @@ function templatePath(): string {
   return new URL("./bootstrap-config.toml", import.meta.url).pathname;
 }
 
+function isTable(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Add missing template values to an existing config without replacing user values. */
+function addMissingDefaults(source: string, config: Record<string, unknown>, defaults: Record<string, unknown>, table = ""): string {
+  let updated = source;
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    const value = config[key];
+    const path = table ? `${table}.${key}` : key;
+    if (value === undefined) {
+      if (isTable(defaultValue)) {
+        updated = addMissingDefaults(updated, {}, defaultValue, path);
+      } else {
+        updated = patchTomlValue(updated, table, key, defaultValue as TomlValue);
+      }
+    } else if (isTable(value) && isTable(defaultValue)) {
+      updated = addMissingDefaults(updated, value, defaultValue, path);
+    }
+  }
+  return updated;
+}
+
 export function detectClaudeBinary(): string | null {
   try {
     const resolved = execFileSync("which", ["claude"], { encoding: "utf-8" }).trim();
@@ -30,14 +54,29 @@ export function detectClaudeBinary(): string | null {
   }
 }
 
-/** `mkdir -p` the config dir and, on first run only, template the config from the bundled default. */
+/** `mkdir -p` the config dir and fill any missing values from the bundled default. */
 export function ensureConfig(configPath: string = CONFIG_PATH): void {
   mkdirSync(dirname(configPath), { recursive: true });
+  const template = readFileSync(templatePath(), "utf-8");
   if (existsSync(configPath)) {
+    const source = readFileSync(configPath, "utf-8");
+    const config = parse(source) as Record<string, unknown>;
+    const defaults = parse(template) as Record<string, unknown>;
+    const runtime = isTable(config.RUNTIME) ? config.RUNTIME : {};
+    const stages = isTable(config.STAGES) ? config.STAGES : {};
+    const coarse = isTable(stages.COARSE) ? stages.COARSE : {};
+
+    let updated = source;
+    //backward compatibility for legacy config with max workers splitted per stage
+    if (runtime.MAX_WORKERS === undefined && typeof coarse.MAX_WORKERS === "number") {
+      updated = patchTomlValue(updated, "RUNTIME", "MAX_WORKERS", coarse.MAX_WORKERS);
+      updated = removeTomlValue(removeTomlValue(updated, "STAGES.COARSE", "MAX_WORKERS"), "STAGES.FINE", "MAX_WORKERS");
+    }
+    updated = addMissingDefaults(updated, parse(updated) as Record<string, unknown>, defaults);
+    if (updated !== source) writeFileSync(configPath, updated, "utf-8");
     return;
   }
 
-  const template = readFileSync(templatePath(), "utf-8");
   const claudeBinary = detectClaudeBinary();
 
   const rendered = claudeBinary
@@ -204,7 +243,8 @@ class ConfigErrorCollector {
 /** Load, validate, and map the UPPER_SNAKE_CASE config TOML. */
 export function loadConfig(configPath: string = CONFIG_PATH): Config {
   const raw = readFileSync(configPath, "utf-8");
-  const table = parse(raw) as Record<string, unknown>;
+  const parsed = parse(raw) as Record<string, unknown>;
+  const table = parsed;
   const errors = new ConfigErrorCollector();
 
   const runtime = errors.table(table, "RUNTIME");
@@ -224,15 +264,8 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
   const callRetries = errors.number(runtime, "CALL_RETRIES", "RUNTIME.CALL_RETRIES");
   errors.numberSatisfies(callRetries, "RUNTIME.CALL_RETRIES", (n) => n >= 0, "must be zero or a positive number");
 
-  let maxWorkers: number;
-  if (typeof runtime.MAX_WORKERS === "number") {
-    maxWorkers = runtime.MAX_WORKERS;
-    errors.numberSatisfies(maxWorkers, "RUNTIME.MAX_WORKERS", (n) => n > 0, "must be a positive number");
-  } else {
-    const legacyCoarse = errors.table(stages, "COARSE", "STAGES.COARSE");
-    maxWorkers = errors.number(legacyCoarse, "MAX_WORKERS", "STAGES.COARSE.MAX_WORKERS");
-    errors.numberSatisfies(maxWorkers, "STAGES.COARSE.MAX_WORKERS", (n) => n > 0, "must be a positive number");
-  }
+  const maxWorkers = errors.number(runtime, "MAX_WORKERS", "RUNTIME.MAX_WORKERS");
+  errors.numberSatisfies(maxWorkers, "RUNTIME.MAX_WORKERS", (n) => n > 0, "must be a positive number");
 
   const arxivCat = errors.nonEmptyStringArray(research, "ARXIV_CAT", "RESEARCH.ARXIV_CAT");
   errors.arxivCategories(arxivCat, "RESEARCH.ARXIV_CAT");

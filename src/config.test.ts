@@ -80,6 +80,63 @@ describe("loadConfig", () => {
     expect(config.fine.maxWorkers).toBe(3);
   });
 
+  it("loads a config normalized by ensureConfig", () => {
+    const legacy = VALID_TOML
+      .replace('CALL_TIMEOUT_SECONDS = 300\n', "")
+      .replace('MIN_SCORE = 6\n', "")
+      .replace('CACHE_DIR = "~/.paperino/cache"\n', "")
+      .replace('PROMPT = "prompt with {research_interests} and {papers}"\n\n[STAGES.FINE]', "[STAGES.FINE]")
+      .replace('PROMPT = "prompt with {research_interests} and {papers}"\n', "");
+    writeFileSync(configPath, legacy, "utf-8");
+    ensureConfig(configPath);
+
+    const config = loadConfig(configPath);
+
+    expect(config.callTimeoutMs).toBe(300_000);
+    expect(config.minScore).toBe(6);
+    expect(config.cacheDir.endsWith("/.paperino/cache")).toBe(true);
+    expect(config.coarse.prompt).toContain("{research_interests}");
+    expect(config.fine.prompt).toContain("{papers}");
+    expect(config.callRetries).toBe(1);
+    expect(config.claudeBinary).toBe("/usr/local/bin/claude");
+  });
+
+  it("loads a missing table restored by ensureConfig", () => {
+    writeFileSync(configPath, VALID_TOML.replace(/\n\[STAGES\.FINE\][\s\S]*$/, "\n"), "utf-8");
+    ensureConfig(configPath);
+
+    const config = loadConfig(configPath);
+
+    expect(config.fine).toEqual({
+      model: "sonnet",
+      callSize: 5,
+      maxWorkers: 10,
+      prompt: expect.stringContaining("{research_interests}"),
+    });
+  });
+
+  it("requires ensureConfig to populate missing values", () => {
+    writeFileSync(configPath, VALID_TOML.replace('CACHE_DIR = "~/.paperino/cache"\n', ""), "utf-8");
+
+    expect(() => loadConfig(configPath)).toThrow(/OUTPUT\.CACHE_DIR/);
+  });
+
+  it("preserves a migrated legacy max workers value", () => {
+    const legacy = VALID_TOML
+      .replace("MAX_WORKERS = 10\n", "")
+      .replace('CALL_SIZE = 20\n', 'CALL_SIZE = 20\nMAX_WORKERS = 3\n');
+    writeFileSync(configPath, legacy, "utf-8");
+    ensureConfig(configPath);
+
+    const config = loadConfig(configPath);
+    const updated = readFileSync(configPath, "utf-8");
+
+    expect(config.coarse.maxWorkers).toBe(3);
+    expect(config.fine.maxWorkers).toBe(3);
+    expect(updated).toContain("MAX_WORKERS = 3");
+    expect(updated).not.toMatch(/\[STAGES\.COARSE\][\s\S]*MAX_WORKERS/);
+  });
+
   it("loads optional Gmail email delivery settings", () => {
     writeFileSync(
       configPath,
@@ -291,10 +348,27 @@ APP_PASSWORD = "abcdefghijklmnop"
 });
 
 describe("ensureConfig", () => {
-  it("does nothing if the config file already exists", () => {
-    writeFileSync(configPath, "sentinel content", "utf-8");
+  it("does not rewrite an already complete config", () => {
+    const complete = VALID_TOML.replace(
+      "[STAGES.COARSE]",
+      `[EMAIL]
+SENDER_ADDRESS = ""
+RECIPIENT_ADDRESS = ""
+APP_PASSWORD = ""
+
+[STAGES.COARSE]`,
+    );
+    writeFileSync(configPath, complete, "utf-8");
     ensureConfig(configPath);
-    expect(readFileSync(configPath, "utf-8")).toBe("sentinel content");
+    expect(readFileSync(configPath, "utf-8")).toBe(complete);
+  });
+
+  it("writes missing values from the bootstrap config", () => {
+    writeFileSync(configPath, VALID_TOML.replace('CACHE_DIR = "~/.paperino/cache"\n', ""), "utf-8");
+
+    ensureConfig(configPath);
+
+    expect(readFileSync(configPath, "utf-8")).toContain('CACHE_DIR = "~/.paperino/cache"');
   });
 
   it("templates CLAUDE_BINARY from `which claude` when detection succeeds", async () => {
