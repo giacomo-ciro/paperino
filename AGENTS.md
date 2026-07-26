@@ -1,6 +1,6 @@
 You help me develop a `paperino` tool to daily fetch the articles just published most relevant to my research and send the results with title, abstract and link to my email.
 
-When asked something about arxiv API or arXiv in general, do not guess. Look at `docs/arxiv-api.md` first, and then fetch online documentations, sdk or whatever you might find helpful to answer your doubts.
+When asked something about arxiv API or arXiv in general, do not guess. Look at `docs/arxiv-api.md`, the code, the README, and then fetch online documentations or whatever you might find helpful to answer your doubts.
 
 The tool is implemented in typescript and distributed via npm. We want a minimal, frictionless and helpful experience for the user. No beels and whistles, no useless UX, just bare minimum to get the user the result.
 
