@@ -1,8 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { formatUTCDate, loadPapers, mergePapers, runDir, savePapers, writeDigest } from "./store.js";
+import {
+  cachePath,
+  checkWritableDir,
+  clearCache,
+  formatUTCDate,
+  loadPapers,
+  mergePapers,
+  savePapers,
+  writeDigest,
+} from "./store.js";
 import type { Paper } from "./types.js";
 
 function paper(id: string, overrides: Partial<Paper> = {}): Paper {
@@ -11,6 +20,7 @@ function paper(id: string, overrides: Partial<Paper> = {}): Paper {
     title: `Title ${id}`,
     abstract: "abstract",
     link: `https://arxiv.org/abs/${id}`,
+    authors: [],
     categories: ["cs.CV"],
     published: "2026-01-05T14:00:00Z",
     journalRef: null,
@@ -35,10 +45,77 @@ describe("formatUTCDate", () => {
   });
 });
 
-describe("runDir", () => {
-  it("creates and returns a dir named by the window-end UTC date", () => {
-    const out = runDir(dir, new Date(Date.UTC(2026, 0, 5, 14, 0, 0)));
-    expect(out).toBe(join(dir, "2026-01-05"));
+describe("checkWritableDir", () => {
+  it("accepts a deep chain of missing dirs and creates it", () => {
+    const target = join(dir, "a", "b", "c", "d");
+    expect(checkWritableDir(target)).toBeNull();
+    expect(existsSync(target)).toBe(true);
+  });
+
+  it("accepts a dir that already exists", () => {
+    expect(checkWritableDir(dir)).toBeNull();
+  });
+
+  it("reports a file sitting in the middle of the path", () => {
+    writeFileSync(join(dir, "afile"), "x");
+    expect(checkWritableDir(join(dir, "afile", "digests"))).toMatch(/file is in the way/);
+  });
+
+  it("reports the target path itself being a file", () => {
+    writeFileSync(join(dir, "afile"), "x");
+    expect(checkWritableDir(join(dir, "afile"))).toMatch(/file is in the way/);
+  });
+
+  it("reports an unwritable parent", () => {
+    const locked = join(dir, "locked");
+    mkdirSync(locked);
+    chmodSync(locked, 0o500);
+    try {
+      expect(checkWritableDir(join(locked, "sub"))).toMatch(/permission denied/);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  });
+
+  it("reports an existing dir that can't be written into (mkdir alone would pass)", () => {
+    const ro = join(dir, "readonly");
+    mkdirSync(ro);
+    chmodSync(ro, 0o500);
+    try {
+      expect(checkWritableDir(ro)).toMatch(/permission denied/);
+    } finally {
+      chmodSync(ro, 0o700);
+    }
+  });
+
+  it("leaves no probe file behind on success", () => {
+    checkWritableDir(dir);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe("cachePath", () => {
+  it("is a flat file named by the window-end UTC date", () => {
+    const out = cachePath(dir, new Date(Date.UTC(2026, 0, 5, 14, 0, 0)));
+    expect(out).toBe(join(dir, "2026-01-05.json"));
+  });
+});
+
+describe("clearCache", () => {
+  it("removes only the given window's cache file", () => {
+    const target = new Date(Date.UTC(2026, 0, 5, 14, 0, 0));
+    const other = new Date(Date.UTC(2026, 0, 6, 14, 0, 0));
+    savePapers(cachePath(dir, target), [paper("a")]);
+    savePapers(cachePath(dir, other), [paper("b")]);
+
+    clearCache(dir, target);
+
+    expect(loadPapers(cachePath(dir, target))).toEqual([]);
+    expect(loadPapers(cachePath(dir, other))).toHaveLength(1);
+  });
+
+  it("is a no-op when the window was never cached", () => {
+    expect(() => clearCache(dir, new Date())).not.toThrow();
   });
 });
 
@@ -60,29 +137,40 @@ describe("mergePapers", () => {
 });
 
 describe("loadPapers/savePapers", () => {
-  it("always writes the dir + papers.json, even for an empty window", () => {
-    const runDirPath = runDir(dir, new Date());
-    savePapers(runDirPath, []);
-    expect(loadPapers(runDirPath)).toEqual([]);
+  it("writes the cache file even for an empty window", () => {
+    const path = cachePath(dir, new Date());
+    savePapers(path, []);
+    expect(loadPapers(path)).toEqual([]);
   });
 
   it("round-trips papers through JSON", () => {
-    const runDirPath = runDir(dir, new Date());
+    const path = cachePath(dir, new Date());
     const papers = [paper("a", { coarse: 1, score: 7 })];
-    savePapers(runDirPath, papers);
-    expect(loadPapers(runDirPath)).toEqual(papers);
+    savePapers(path, papers);
+    expect(loadPapers(path)).toEqual(papers);
   });
 
-  it("returns an empty array when papers.json doesn't exist yet", () => {
-    const runDirPath = runDir(dir, new Date());
-    expect(loadPapers(runDirPath)).toEqual([]);
+  it("returns an empty array when the cache file doesn't exist yet", () => {
+    expect(loadPapers(cachePath(dir, new Date()))).toEqual([]);
+  });
+
+  it("creates the cache dir if it doesn't exist yet", () => {
+    const path = cachePath(join(dir, "nested", "cache"), new Date());
+    savePapers(path, [paper("a")]);
+    expect(loadPapers(path)).toHaveLength(1);
   });
 });
 
 describe("writeDigest", () => {
-  it("writes digest.html and returns its path", () => {
-    const runDirPath = runDir(dir, new Date());
-    const path = writeDigest(runDirPath, "<p>hello</p>");
-    expect(path).toBe(join(runDirPath, "digest.html"));
+  it("writes a flat YYYY-MM-DD.html named by the window end", () => {
+    const path = writeDigest(dir, new Date(Date.UTC(2026, 0, 5, 14, 0, 0)), "<p>hello</p>");
+    expect(path).toBe(join(dir, "2026-01-05.html"));
+    expect(readFileSync(path, "utf-8")).toBe("<p>hello</p>");
+  });
+
+  it("creates the output dir if it doesn't exist yet", () => {
+    const outDir = join(dir, "nested", "digests");
+    const path = writeDigest(outDir, new Date(Date.UTC(2026, 0, 5, 14, 0, 0)), "<p>hi</p>");
+    expect(path).toBe(join(outDir, "2026-01-05.html"));
   });
 });

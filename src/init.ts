@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import pc from "picocolors";
 import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
 import { CONFIG_PATH, detectClaudeBinary } from "./config.js";
+import { checkWritableDir } from "./store.js";
 
 const ALLOWED_MODELS = ["fable", "opus", "sonnet", "haiku"];
 const TOTAL_STEPS = 6;
@@ -32,6 +34,20 @@ function validateCategories(raw: string): string | null {
   return null;
 }
 
+/**
+ * Rejects relative paths (they'd resolve against wherever paperino was launched
+ * from) and paths we couldn't actually write to, so a bad answer is caught here
+ * rather than crashing the first real run.
+ */
+function validateOutDir(value: string): string | null {
+  if (!value.startsWith("~") && !isAbsolute(value)) {
+    return 'must be an absolute path, or start with "~" for your home directory';
+  }
+  const expanded = value.startsWith("~") ? join(homedir(), value.slice(1)) : value;
+  const problem = checkWritableDir(expanded);
+  return problem ? `can't write there: ${problem}` : null;
+}
+
 /** Positive-integer validator, optionally bounded. */
 function positiveInteger(label: string, opts: { min?: number; max?: number } = {}): Validator {
   return (value: string) => {
@@ -54,7 +70,7 @@ function heading(step: number, text: string): void {
 interface Answers {
   researchInterests: string;
   arxivCat: string[];
-  minScore: number;
+  outDir: string;
   coarseModel: string;
   fineModel: string;
   coarseCallSize: number;
@@ -69,7 +85,7 @@ function renderConfig(template: string, a: Answers): string {
   let rendered = template
     .replace("ARXIV_CAT = []", `ARXIV_CAT = [${arxivCatToml}]`)
     .replace('RESEARCH_INTERESTS = """\n"""', `RESEARCH_INTERESTS = """\n${a.researchInterests}\n"""`)
-    .replace("MIN_SCORE = 6", `MIN_SCORE = ${a.minScore}`);
+    .replace('OUT_DIR = "~/paperino/digests"', `OUT_DIR = "${a.outDir}"`);
 
   const stageBlock = (name: "COARSE" | "FINE", model: string, callSize: number): [RegExp, string] => [
     new RegExp(`(\\[STAGES\\.${name}\\]\\nMODEL = )"[^"]+"( # one of: fable, opus, sonnet, haiku\\nCALL_SIZE = )\\d+`),
@@ -171,13 +187,12 @@ export async function runInit(configPath: string = CONFIG_PATH): Promise<void> {
   const arxivCatRaw = await askRequired("Category codes (comma-separated):", validateCategories);
   const arxivCat = arxivCatRaw.split(",").map((s) => s.trim()).filter(Boolean);
 
-  // ---- Step 3: min score threshold ----
-  heading(3, "Relevance threshold");
-  say(pc.dim("Papers scoring at or above this (1-10) get a full summary in the digest;"));
-  say(pc.dim("the rest get a one-line mention."));
+  // ---- Step 3: output directory ----
+  heading(3, "Where should the digests go?");
+  say(pc.dim("Each run writes one file, <dir>/YYYY-MM-DD.html, so they sit side by side."));
+  say(pc.dim("Pick somewhere you'll actually look. Must be an absolute path (~ is fine)."));
   say("");
-  const minScoreRaw = await ask("Minimum score", "6", positiveInteger("Minimum score", { min: 1, max: 10 }));
-  const minScore = Number.parseInt(minScoreRaw, 10);
+  const outDir = await ask("Digest directory", "~/paperino/digests", validateOutDir);
 
   // ---- Step 4: models ----
   heading(4, "Models");
@@ -218,7 +233,7 @@ export async function runInit(configPath: string = CONFIG_PATH): Promise<void> {
   say("");
   say(`${pc.dim("Research interests")}  ${researchInterests}`);
   say(`${pc.dim("arXiv categories")}    ${arxivCat.join(", ")}`);
-  say(`${pc.dim("Min score")}           ${minScore}`);
+  say(`${pc.dim("Digest directory")}    ${outDir}`);
   say(`${pc.dim("Coarse model")}        ${coarseModel} (${coarseCallSize} papers/call)`);
   say(`${pc.dim("Fine model")}          ${fineModel} (${fineCallSize} papers/call)`);
   say(`${pc.dim("Concurrency")}         ${maxWorkers} concurrent calls`);
@@ -239,7 +254,7 @@ export async function runInit(configPath: string = CONFIG_PATH): Promise<void> {
   let rendered = renderConfig(template, {
     researchInterests,
     arxivCat,
-    minScore,
+    outDir,
     coarseModel,
     fineModel,
     coarseCallSize,

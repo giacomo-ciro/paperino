@@ -20,6 +20,13 @@ const SAMPLE_FEED = `<?xml version="1.0" encoding="UTF-8"?>
     <link href="http://arxiv.org/abs/2601.00001v1" rel="alternate" type="text/html"/>
     <link title="pdf" href="http://arxiv.org/pdf/2601.00001v1" rel="related" type="application/pdf"/>
     <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <author>
+      <name>Ada Lovelace</name>
+      <arxiv:affiliation>INRAE</arxiv:affiliation>
+    </author>
+    <author>
+      <name>Alan Turing</name>
+    </author>
     <arxiv:comment>10 pages, 5 figures</arxiv:comment>
   </entry>
   <entry>
@@ -31,6 +38,12 @@ const SAMPLE_FEED = `<?xml version="1.0" encoding="UTF-8"?>
     <link title="pdf" href="http://arxiv.org/pdf/2601.00002v2" rel="related" type="application/pdf"/>
     <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
     <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <author>
+      <name>Grace Hopper</name>
+    </author>
+    <author>
+      <name>Team 8</name>
+    </author>
     <arxiv:journal_ref>Journal of Examples, 2026</arxiv:journal_ref>
     <arxiv:comment>Accepted at ICML</arxiv:comment>
   </entry>
@@ -54,12 +67,37 @@ const EMPTY_FEED = `<?xml version="1.0" encoding="UTF-8"?>
   <opensearch:itemsPerPage>100</opensearch:itemsPerPage>
 </feed>`;
 
+// every text node here is numeric-looking, which the XML parser coerces to a
+// number unless told otherwise — .trim() on a number throws
+const NUMERIC_FEED = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <opensearch:itemsPerPage>100</opensearch:itemsPerPage>
+  <entry>
+    <id>http://arxiv.org/abs/2601.00004v1</id>
+    <title>1984</title>
+    <summary>42</summary>
+    <published>2026-01-05T11:00:00Z</published>
+    <link href="http://arxiv.org/abs/2601.00004v1" rel="alternate" type="text/html"/>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <author>
+      <name>2001</name>
+      <arxiv:affiliation>1234</arxiv:affiliation>
+    </author>
+    <arxiv:journal_ref>2026</arxiv:journal_ref>
+    <arxiv:comment>10</arxiv:comment>
+  </entry>
+</feed>`;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("fetchRecentPapers", () => {
-  it("parses single/2/3-category entries with and without journal_ref", async () => {
+  it("parses single/2/3-category entries with and without journal_ref and authors", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -77,6 +115,10 @@ describe("fetchRecentPapers", () => {
       title: "A Single Category Paper",
       abstract: "This is the abstract of the single-category paper.",
       link: "http://arxiv.org/abs/2601.00001v1",
+      authors: [
+        { name: "Ada Lovelace", affiliation: "INRAE" },
+        { name: "Alan Turing", affiliation: null },
+      ],
       categories: ["cs.CV"],
       published: "2026-01-05T14:00:00Z",
       journalRef: null,
@@ -88,6 +130,11 @@ describe("fetchRecentPapers", () => {
       title: "A Two Category Paper",
       abstract: "Abstract of the two-category paper.",
       link: "http://arxiv.org/abs/2601.00002v2",
+      authors: [
+        { name: "Grace Hopper", affiliation: null },
+        // numeric-looking names arrive from the parser as numbers
+        { name: "Team 8", affiliation: null },
+      ],
       categories: ["cs.LG", "cs.CV"],
       published: "2026-01-05T13:00:00Z",
       journalRef: "Journal of Examples, 2026",
@@ -99,6 +146,7 @@ describe("fetchRecentPapers", () => {
       title: "A Three Category Paper",
       abstract: "Abstract of the three-category paper.",
       link: "http://arxiv.org/abs/2601.00003v1",
+      authors: [],
       categories: ["cs.RO", "cs.CV", "cs.AI"],
       published: "2026-01-05T12:00:00Z",
       journalRef: null,
@@ -121,6 +169,33 @@ describe("fetchRecentPapers", () => {
 
     const papers = await fetchRecentPapers(["cs.CV"], new Date(0), new Date(1), undefined);
     expect(papers).toEqual([]);
+  });
+
+  it("keeps numeric-looking titles, abstracts and author names as strings", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => NUMERIC_FEED,
+      }),
+    );
+
+    const papers = await fetchRecentPapers(["cs.CV"], new Date(0), new Date(1), undefined);
+
+    expect(papers).toHaveLength(1);
+    expect(papers[0]).toEqual({
+      id: "2601.00004v1",
+      title: "1984",
+      abstract: "42",
+      link: "http://arxiv.org/abs/2601.00004v1",
+      authors: [{ name: "2001", affiliation: "1234" }],
+      categories: ["cs.CV"],
+      published: "2026-01-05T11:00:00Z",
+      journalRef: "2026",
+      comment: "10",
+    });
   });
 
   it("caps results at maxPapers, most-recent-first", async () => {

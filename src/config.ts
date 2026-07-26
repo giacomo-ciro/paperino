@@ -1,9 +1,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { parse } from "smol-toml";
 import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
+import { checkWritableDir } from "./store.js";
 import type { Config, StageConfig } from "./types.js";
 
 export const CONFIG_DIR = join(homedir(), ".paperino");
@@ -108,6 +109,30 @@ class ConfigErrorCollector {
     }
   }
 
+  /**
+   * Path already tilde-expanded; must be absolute. A relative path would resolve
+   * against the cwd, so `paperino` would read/write different places depending on
+   * where it was launched from (notably under cron).
+   */
+  absolutePath(value: string, label: string): void {
+    if (value !== "" && !isAbsolute(value)) {
+      this.add(`"${label}" must be an absolute path or start with "~" (got "${value}")`);
+    }
+  }
+
+  /**
+   * Path already checked absolute; confirms we can actually create files there, so
+   * an unwritable dir fails now rather than after a run has spent model calls.
+   */
+  writableDir(dir: string, label: string): void {
+    // Skip when absent or already flagged relative — don't create dirs off the cwd.
+    if (dir === "" || !isAbsolute(dir)) return;
+    const problem = checkWritableDir(dir);
+    if (problem) {
+      this.add(`"${label}" is not writable: ${problem}`);
+    }
+  }
+
   /** String already extracted via `.nonEmptyString()`; checks it's one of `allowed`. */
   oneOf(value: string, allowed: string[], label: string): void {
     if (value !== "" && !allowed.includes(value)) {
@@ -200,6 +225,18 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
   const minScore = errors.number(research, "MIN_SCORE", "RESEARCH.MIN_SCORE");
   errors.numberSatisfies(minScore, "RESEARCH.MIN_SCORE", (n) => n >= 1 && n <= 10, "must be between 1 and 10");
 
+  const cacheDir = expandTilde(errors.nonEmptyString(output, "CACHE_DIR", "OUTPUT.CACHE_DIR"));
+  errors.absolutePath(cacheDir, "OUTPUT.CACHE_DIR");
+  errors.writableDir(cacheDir, "OUTPUT.CACHE_DIR");
+
+  const outDir = expandTilde(errors.nonEmptyString(output, "OUT_DIR", "OUTPUT.OUT_DIR"));
+  errors.absolutePath(outDir, "OUTPUT.OUT_DIR");
+  errors.writableDir(outDir, "OUTPUT.OUT_DIR");
+
+  const logFile = expandTilde(errors.nonEmptyString(output, "LOG_FILE", "OUTPUT.LOG_FILE"));
+  errors.absolutePath(logFile, "OUTPUT.LOG_FILE");
+  errors.writableDir(dirname(logFile), "OUTPUT.LOG_FILE");
+
   const config: Config = {
     claudeBinary: errors.nonEmptyString(runtime, "CLAUDE_BINARY", "RUNTIME.CLAUDE_BINARY"),
     callTimeoutMs: callTimeoutSeconds * 1000,
@@ -207,8 +244,9 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
     arxivCat,
     researchInterests: errors.nonEmptyString(research, "RESEARCH_INTERESTS", "RESEARCH.RESEARCH_INTERESTS"),
     minScore,
-    outDir: expandTilde(errors.nonEmptyString(output, "OUT_DIR", "OUTPUT.OUT_DIR")),
-    logFile: expandTilde(errors.nonEmptyString(output, "LOG_FILE", "OUTPUT.LOG_FILE")),
+    cacheDir,
+    outDir,
+    logFile,
     coarse: errors.stage(stages, "COARSE", "STAGES.COARSE"),
     fine: errors.stage(stages, "FINE", "STAGES.FINE"),
   };

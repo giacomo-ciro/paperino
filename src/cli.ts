@@ -12,11 +12,11 @@ import { confirmRun, makePipelineView, makeSilentPipelineView, type PipelineView
 import { coarseFilter, fineScoring, type ScoringProgress } from "./scoring.js";
 import { checkForUpdateAsync, readCachedUpdate } from "./update-check.js";
 import {
-  clearRunDir,
+  cachePath,
+  clearCache,
   formatUTCDate,
   loadPapers,
   mergePapers,
-  runDir,
   savePapers,
   writeDigest,
 } from "./store.js";
@@ -222,9 +222,9 @@ program
 
       for (const [start, end] of windows) {
         if (options.force) {
-          clearRunDir(cfg.outDir, end);
+          clearCache(cfg.cacheDir, end);
         }
-        const dir = runDir(cfg.outDir, end);
+        const cacheFile = cachePath(cfg.cacheDir, end);
         const label = formatUTCDate(end);
 
         logger.windowStart(label);
@@ -234,10 +234,10 @@ program
           : makePipelineView(label, options.onlyFetch ? ["Fetching papers"] : undefined);
 
         logger.stageStart("Fetching papers");
-        const existing = loadPapers(dir);
+        const existing = loadPapers(cacheFile);
         const fetched = await fetchRecentPapers(cfg.arxivCat, start, end, maxPapers);
         const papers = mergePapers(existing, fetched);
-        savePapers(dir, papers);
+        savePapers(cacheFile, papers);
 
         const toProcess = capMostRecent(papers, maxPapers);
         const cappedNote =
@@ -250,7 +250,7 @@ program
 
         if (options.onlyFetch) {
           view.stop();
-          outputPaths.push(`${dir}/papers.json`);
+          outputPaths.push(cacheFile);
           continue;
         }
 
@@ -270,7 +270,7 @@ program
         const coarseMetrics = formatProgress("coarse", coarseProgress);
         view.complete(coarseMetrics, coarseProgress.failed > 0);
         logger.stageEnd("Coarse filtering", coarseMetrics);
-        savePapers(dir, papers);
+        savePapers(cacheFile, papers);
 
         logger.stageStart("Fine filtering");
         let lastFine: ScoringProgress | undefined;
@@ -288,11 +288,11 @@ program
         const fineMetrics = formatProgress("fine", fineProgress);
         view.complete(fineMetrics, fineProgress.failed > 0);
         logger.stageEnd("Fine filtering", fineMetrics);
-        savePapers(dir, papers);
+        savePapers(cacheFile, papers);
         view.stop();
 
-        const { subject, body } = buildDigest(papers, label, cfg.minScore);
-        const htmlPath = writeDigest(dir, renderDigestHtml(subject, body));
+        const { subject, body } = buildDigest(papers, end, cfg.minScore);
+        const htmlPath = writeDigest(cfg.outDir, end, renderDigestHtml(subject, body));
         const windowFailed = coarseProgress.failed > 0 || fineProgress.failed > 0;
         if (windowFailed) {
           hadFailures = true;

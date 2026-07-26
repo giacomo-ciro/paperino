@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import type { Paper } from "./types.js";
+import type { Author, Paper } from "./types.js";
 
 const ARXIV_API_BASE = "https://export.arxiv.org/api/query";
 const PAGE_SIZE = 100;
@@ -10,6 +10,10 @@ const parser = new XMLParser({
   attributeNamePrefix: "@_",
   isArray: (name) => ["entry", "category", "author", "link"].includes(name),
   removeNSPrefix: true,
+  // Keep every text node a string: by default numeric-looking content is coerced
+  // to a number, so a paper titled "1984" would crash .trim(). totalResults is
+  // parsed back to a number explicitly below.
+  parseTagValue: false,
 });
 
 interface AtomLink {
@@ -21,12 +25,18 @@ interface AtomCategory {
   "@_term": string;
 }
 
+interface AtomAuthor {
+  name: string;
+  affiliation?: string;
+}
+
 interface AtomEntry {
   id: string;
   title: string;
   summary: string;
   published: string;
   link: AtomLink[];
+  author?: AtomAuthor[];
   category: AtomCategory[];
   journal_ref?: string;
   comment?: string;
@@ -34,8 +44,16 @@ interface AtomEntry {
 
 interface AtomFeed {
   feed: {
-    totalResults: number;
+    totalResults: string; // parseTagValue:false keeps this a string
     entry?: AtomEntry[];
+  };
+}
+
+function toAuthor(a: AtomAuthor): Author {
+  const affiliation = a.affiliation?.trim() ?? "";
+  return {
+    name: a.name.trim(),
+    affiliation: affiliation === "" ? null : affiliation,
   };
 }
 
@@ -48,6 +66,7 @@ function toPaper(entry: AtomEntry): Paper {
     title: entry.title.trim(),
     abstract: entry.summary.trim(),
     link,
+    authors: (entry.author ?? []).map(toAuthor),
     categories: entry.category.map((c) => c["@_term"]),
     published: entry.published,
     journalRef: entry.journal_ref ?? null,
@@ -105,7 +124,7 @@ export async function fetchRecentPapers(
     const xml = await response.text();
     const parsed = parser.parse(xml) as AtomFeed;
 
-    totalResults = parsed.feed.totalResults;
+    totalResults = Number(parsed.feed.totalResults);
     const entries = parsed.feed.entry ?? [];
     if (entries.length === 0) {
       break;

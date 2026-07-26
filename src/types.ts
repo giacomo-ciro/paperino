@@ -1,8 +1,14 @@
+export interface Author {
+  name: string;
+  affiliation: string | null; // arXiv <arxiv:affiliation>; submitter-supplied, usually absent
+}
+
 export interface Paper {
   id: string; // short id "2601.02594v1" (URL-prefix stripped; "/"→"_")
   title: string;
   abstract: string; // arXiv <summary>
   link: string; // <id> abs URL
+  authors: Author[]; // feed order
   categories: string[];
   published: string; // ISO 8601
   journalRef: string | null;
@@ -26,7 +32,8 @@ export interface Config {
   arxivCat: string[];
   researchInterests: string;
   minScore: number;
-  outDir: string; // ~-expanded absolute
+  cacheDir: string; // ~-expanded absolute; holds YYYY-MM-DD.json, safe to delete
+  outDir: string; // ~-expanded absolute; holds YYYY-MM-DD.html digests
   logFile: string; // ~-expanded absolute; always appended to
   callTimeoutMs: number; // per claude call timeout (config: RUNTIME.CALL_TIMEOUT_SECONDS → ms)
   callRetries: number; // retries after the first attempt (config: RUNTIME.CALL_RETRIES)

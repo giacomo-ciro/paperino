@@ -26,11 +26,15 @@ RESEARCH_INTERESTS = """
 # mention in the digest instead of a full summary.
 MIN_SCORE = 6
 
-# Where results land.
+# Where results land. All three paths must be absolute (a leading "~" is fine).
 [OUTPUT]
-# Each run writes to <out-dir>/YYYY-MM-DD/{papers.json, digest.html}, where
-# YYYY-MM-DD is the submission window's cutoff date (UTC), not the run date.
-OUT_DIR = "~/.paperino/outputs"
+# One digest per run: <out-dir>/YYYY-MM-DD.html, where YYYY-MM-DD is the
+# submission window's cutoff date (UTC), not the run date.
+OUT_DIR = "~/paperino/digests"
+# Fetched papers and their scores, cached as <cache-dir>/YYYY-MM-DD.json so a
+# rerun skips work already done. Safe to delete — it only costs a refetch.
+# `paperino --force` clears the current window's cache to rerun from scratch.
+CACHE_DIR = "~/.paperino/cache"
 # Every run appends here (the file is never rotated). `paperino --logs` tails it.
 LOG_FILE = "~/.paperino/paperino.log"
 

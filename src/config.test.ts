@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,7 +30,8 @@ RESEARCH_INTERESTS = "point clouds"
 MIN_SCORE = 6
 
 [OUTPUT]
-OUT_DIR = "~/.paperino/outputs"
+OUT_DIR = "~/paperino/digests"
+CACHE_DIR = "~/.paperino/cache"
 LOG_FILE = "~/.paperino/paperino.log"
 
 [STAGES.COARSE]
@@ -76,7 +77,59 @@ describe("loadConfig", () => {
     const config = loadConfig(configPath);
 
     expect(config.outDir).not.toContain("~");
-    expect(config.outDir.endsWith("/.paperino/outputs")).toBe(true);
+    expect(config.outDir.endsWith("/paperino/digests")).toBe(true);
+  });
+
+  it("expands ~ in CACHE_DIR", () => {
+    writeFileSync(configPath, VALID_TOML, "utf-8");
+    const config = loadConfig(configPath);
+
+    expect(config.cacheDir).not.toContain("~");
+    expect(config.cacheDir.endsWith("/.paperino/cache")).toBe(true);
+  });
+
+  it("rejects a relative OUT_DIR, which would depend on the launch directory", () => {
+    writeFileSync(configPath, VALID_TOML.replace('OUT_DIR = "~/paperino/digests"', 'OUT_DIR = "digests"'), "utf-8");
+
+    expect(() => loadConfig(configPath)).toThrow(/OUTPUT\.OUT_DIR.*absolute/s);
+  });
+
+  it("rejects an unwritable OUT_DIR at load time, before any model calls", () => {
+    const locked = join(dir, "locked");
+    mkdirSync(locked);
+    chmodSync(locked, 0o500);
+    try {
+      writeFileSync(
+        configPath,
+        VALID_TOML.replace('OUT_DIR = "~/paperino/digests"', `OUT_DIR = "${join(locked, "digests")}"`),
+        "utf-8",
+      );
+      expect(() => loadConfig(configPath)).toThrow(/OUTPUT\.OUT_DIR" is not writable.*permission denied/s);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  });
+
+  it("rejects an OUT_DIR blocked by a file in the path", () => {
+    const blocker = join(dir, "blocker");
+    writeFileSync(blocker, "x");
+    writeFileSync(
+      configPath,
+      VALID_TOML.replace('OUT_DIR = "~/paperino/digests"', `OUT_DIR = "${join(blocker, "digests")}"`),
+      "utf-8",
+    );
+
+    expect(() => loadConfig(configPath)).toThrow(/OUTPUT\.OUT_DIR" is not writable.*file is in the way/s);
+  });
+
+  it("rejects a relative CACHE_DIR", () => {
+    writeFileSync(
+      configPath,
+      VALID_TOML.replace('CACHE_DIR = "~/.paperino/cache"', 'CACHE_DIR = "./cache"'),
+      "utf-8",
+    );
+
+    expect(() => loadConfig(configPath)).toThrow(/OUTPUT\.CACHE_DIR.*absolute/s);
   });
 
   it("expands ~ in LOG_FILE", () => {

@@ -8,6 +8,7 @@ function paper(id: string, overrides: Partial<Paper> = {}): Paper {
     title: `Title ${id}`,
     abstract: "abstract",
     link: `https://arxiv.org/abs/${id}`,
+    authors: [],
     categories: ["cs.CV"],
     published: "2026-01-05T14:00:00Z",
     journalRef: null,
@@ -22,11 +23,15 @@ describe("escapeHtml", () => {
   });
 });
 
+const WINDOW_END = new Date("2026-01-05T19:00:00Z"); // Monday
+
 describe("buildDigest", () => {
   it("returns the empty-state body when there are no coarse-passed papers", () => {
-    const { subject, body } = buildDigest([paper("a", { coarse: 0 })], "2026-01-05", 6);
-    expect(subject).toBe("arXiv digest — 2026-01-05 (0 papers)");
-    expect(body).toContain("submission window 2026-01-05 — no relevant papers.");
+    const { subject, body } = buildDigest([paper("a", { coarse: 0 })], WINDOW_END, 6);
+    expect(subject).toBe("Paperino (Monday, 5 January 2026)");
+    expect(body).toContain("<h1");
+    expect(body).toContain("Paperino (Monday, 5 January 2026)");
+    expect(body).toContain("No relevant papers.");
     expect(body).toContain("built by");
   });
 
@@ -38,9 +43,10 @@ describe("buildDigest", () => {
       paper("dropped", { coarse: 0 }), // filtered out entirely
     ];
 
-    const { subject, body } = buildDigest(papers, "2026-01-05", 6);
+    const { subject, body } = buildDigest(papers, WINDOW_END, 6);
 
-    expect(subject).toBe("arXiv digest — 2026-01-05 (1 papers)");
+    expect(subject).toBe("Paperino (Monday, 5 January 2026)");
+    expect(body).toContain("3/4 papers passed the coarse filter, 1 scored ≥ 6.");
     expect(body).toContain("Title high");
     expect(body).toContain("Score: 9/10");
     expect(body).toContain("Lower-scored papers");
@@ -56,8 +62,67 @@ describe("buildDigest", () => {
       paper("mid", { coarse: 1, score: 7 }),
       paper("top", { coarse: 1, score: 10 }),
     ];
-    const { body } = buildDigest(papers, "2026-01-05", 6);
+    const { body } = buildDigest(papers, WINDOW_END, 6);
     expect(body.indexOf("Title top")).toBeLessThan(body.indexOf("Title mid"));
+  });
+
+  it("renders every author, numbering deduped affiliations by first appearance", () => {
+    const papers = [
+      paper("x", {
+        coarse: 1,
+        score: 9,
+        authors: [
+          { name: "Ada Lovelace", affiliation: "Udine" },
+          { name: "Alan Turing", affiliation: "ANDRA" },
+          { name: "Grace Hopper", affiliation: "Udine" },
+          { name: "Katherine Johnson", affiliation: null },
+        ],
+      }),
+    ];
+    const { body } = buildDigest(papers, WINDOW_END, 6);
+
+    expect(body).toContain(
+      "Ada Lovelace<sup>1</sup>, Alan Turing<sup>2</sup>, " +
+        "Grace Hopper<sup>1</sup>, Katherine Johnson",
+    );
+    expect(body).toContain("<div><sup>1</sup>Udine</div><div><sup>2</sup>ANDRA</div>");
+  });
+
+  it("renders names only when no author has an affiliation", () => {
+    const papers = [
+      paper("x", {
+        coarse: 1,
+        score: 9,
+        authors: [
+          { name: "Ada Lovelace", affiliation: null },
+          { name: "Alan Turing", affiliation: null },
+        ],
+      }),
+    ];
+    const { body } = buildDigest(papers, WINDOW_END, 6);
+
+    expect(body).toContain("Ada Lovelace, Alan Turing");
+    expect(body).not.toContain("<sup>");
+  });
+
+  it("omits the author block entirely when there are no authors", () => {
+    const { body } = buildDigest([paper("x", { coarse: 1, score: 9 })], WINDOW_END, 6);
+    expect(body).not.toContain("<sup>");
+    expect(body).not.toContain("color:#555;margin:2px 0 2px");
+  });
+
+  it("HTML-escapes author names and affiliations", () => {
+    const papers = [
+      paper("x", {
+        coarse: 1,
+        score: 9,
+        authors: [{ name: "<script>alert(1)</script>", affiliation: "Foo & Bar" }],
+      }),
+    ];
+    const { body } = buildDigest(papers, WINDOW_END, 6);
+    expect(body).not.toContain("<script>alert(1)</script>");
+    expect(body).toContain("&lt;script&gt;");
+    expect(body).toContain("Foo &amp; Bar");
   });
 
   it("HTML-escapes title/summary/etc in a full card", () => {
@@ -69,7 +134,7 @@ describe("buildDigest", () => {
         summary: "a & b",
       }),
     ];
-    const { body } = buildDigest(papers, "2026-01-05", 6);
+    const { body } = buildDigest(papers, WINDOW_END, 6);
     expect(body).not.toContain("<script>alert(1)</script>");
     expect(body).toContain("&lt;script&gt;");
     expect(body).toContain("a &amp; b");
