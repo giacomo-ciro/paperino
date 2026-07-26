@@ -72,6 +72,11 @@ and add:
 # minute 30, hour 9, Mon-Fri
 30 9 * * 1-5 paperino --quiet --email
 ```
+Cron runs with a minimal `PATH` and won't see your shell's setup, so `paperino` may not resolve. Run `which paperino` and use the full path instead. If your Node is managed by a version manager like nvm, cron also needs to find `node` — get both directories with `dirname "$(which node)"` and `dirname "$(which paperino)"`, then set them above the schedule:
+```bash
+PATH=/home/you/.nvm/versions/node/v24.15.0/bin:/home/you/.npm-global/bin:/usr/bin:/bin
+30 9 * * 1-5 paperino --quiet --email
+```
 > **Note:** arXiv announces new submissions at 20:00 ET on Sun/Mon/Tue/Wed/Thu. Running at 9:30 AM CET (3:30 ET) ensures the run always lands after the prior evening's announcement, catching all five announcements without needing to run on weekends.
 
 ## How It Works
