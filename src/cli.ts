@@ -14,14 +14,14 @@ import { checkForUpdateAsync, readCachedUpdate } from "./update-check.js";
 import {
   cachePath,
   clearCache,
-  formatUTCDate,
+  formatAnnouncementDate,
   loadPapers,
   mergePapers,
   savePapers,
   writeDigest,
 } from "./store.js";
 import type { Paper } from "./types.js";
-import { windowsToProcess } from "./window.js";
+import { announcementsToProcess } from "./window.js";
 
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
@@ -36,7 +36,7 @@ function parsePositiveInteger(value: string): number {
 
   const parsed = Number.parseInt(value, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new InvalidArgumentError("must be a positive integer (1-indexed)");
+    throw new InvalidArgumentError("must be a positive integer");
   }
 
   return parsed;
@@ -111,7 +111,7 @@ program
   )
   .option(
     "--force",
-    "discard any existing run/digest for the given windows and rerun from scratch.",
+    "discard any existing run/digest for the selected announcements and rerun from scratch.",
     false,
   )
   .option(
@@ -126,7 +126,7 @@ program
   )
   .option(
     "--max-papers <n>",
-    "cap papers processed per window, most recently submitted first (default: unlimited).",
+    "cap papers processed per announcement, most recently submitted first (default: unlimited).",
     parsePositiveInteger,
   )
   .option(
@@ -140,14 +140,8 @@ program
     false,
   )
   .option(
-    "--start-from <n>",
-    "1-indexed window to start from, most recent first .",
-    parsePositiveInteger,
-    1,
-  )
-  .option(
-    "--windows <n>",
-    "number of windows to process, walking forward from --start-from toward the present.",
+    "--last <n>",
+    "number of latest arXiv announcements to process.",
     parsePositiveInteger,
     1,
   )
@@ -158,8 +152,7 @@ program
       init?: boolean;
       logs?: boolean;
       email?: boolean;
-      startFrom: number;
-      windows: number;
+      last: number;
       maxPapers?: number;
       onlyFetch?: boolean;
       force?: boolean;
@@ -191,7 +184,7 @@ program
 
       const logger = makeLogger(cfg.logFile);
 
-      const windows = windowsToProcess(new Date(), options.startFrom, options.windows);
+      const announcements = announcementsToProcess(new Date(), options.last);
       const maxPapers = options.maxPapers;
 
       checkForUpdateAsync();
@@ -201,7 +194,7 @@ program
       if (
         !options.yes &&
         !(await confirmRun(
-          windows,
+          announcements,
           cfg,
           maxPapers,
           options.force ?? false,
@@ -218,16 +211,17 @@ program
       const outputPaths: string[] = [];
       let hadFailures = false;
 
-      logger.pipelineStart(windows.length);
+      logger.pipelineStart(announcements.length);
 
-      for (const [start, end] of windows) {
+      for (const announcement of announcements) {
+        const { announcedAt, submittedFrom, submittedUntil } = announcement;
         if (options.force) {
-          clearCache(cfg.cacheDir, end);
+          clearCache(cfg.cacheDir, announcedAt);
         }
-        const cacheFile = cachePath(cfg.cacheDir, end);
-        const label = formatUTCDate(end);
+        const cacheFile = cachePath(cfg.cacheDir, announcedAt);
+        const label = formatAnnouncementDate(announcedAt);
 
-        logger.windowStart(label);
+        logger.announcementStart(label);
 
         const view: PipelineView = options.quiet
           ? makeSilentPipelineView()
@@ -235,7 +229,12 @@ program
 
         logger.stageStart("Fetching papers");
         const existing = loadPapers(cacheFile);
-        const fetched = await fetchRecentPapers(cfg.arxivCat, start, end, maxPapers);
+        const fetched = await fetchRecentPapers(
+          cfg.arxivCat,
+          submittedFrom,
+          submittedUntil,
+          maxPapers,
+        );
         const papers = mergePapers(existing, fetched);
         savePapers(cacheFile, papers);
 
@@ -291,10 +290,10 @@ program
         savePapers(cacheFile, papers);
         view.stop();
 
-        const { subject, body } = buildDigest(papers, end, cfg.minScore);
-        const htmlPath = writeDigest(cfg.outDir, end, renderDigestHtml(subject, body));
-        const windowFailed = coarseProgress.failed > 0 || fineProgress.failed > 0;
-        if (windowFailed) {
+        const { subject, body } = buildDigest(papers, announcedAt, cfg.minScore);
+        const htmlPath = writeDigest(cfg.outDir, announcedAt, renderDigestHtml(subject, body));
+        const announcementFailed = coarseProgress.failed > 0 || fineProgress.failed > 0;
+        if (announcementFailed) {
           hadFailures = true;
           const failedCalls = coarseProgress.failed + fineProgress.failed;
           if (!options.quiet) {

@@ -26,7 +26,7 @@ describe("makeLogger", () => {
     const logger = makeLogger(logPath);
 
     logger.pipelineStart(2);
-    logger.windowStart("2026-01-05");
+    logger.announcementStart("2026-01-05");
     logger.stageStart("Coarse filtering");
     logger.callFailed("Coarse filtering", "claude exited with code 1: boom");
     logger.stageEnd("Coarse filtering", "42/42 papers processed (10/42 papers kept, 3/3 calls done, 1 failed)");
@@ -34,8 +34,8 @@ describe("makeLogger", () => {
 
     const lines = readFileSync(logPath, "utf-8").trim().split("\n");
     expect(lines).toHaveLength(6);
-    expect(lines[0]).toMatch(/^\[.+\] pipeline started \(2 window\(s\) to process\)$/);
-    expect(lines[1]).toMatch(/^\[.+\] processing window 2026-01-05$/);
+    expect(lines[0]).toMatch(/^\[.+\] pipeline started \(2 announcement\(s\) to process\)$/);
+    expect(lines[1]).toMatch(/^\[.+\] processing announcement 2026-01-05$/);
     expect(lines[2]).toMatch(/^\[.+\]\s{3}stage started: Coarse filtering$/);
     expect(lines[3]).toMatch(/^\[.+\]\s{3}call failed: Coarse filtering — claude exited with code 1: boom$/);
     expect(lines[4]).toMatch(

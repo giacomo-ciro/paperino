@@ -9,10 +9,10 @@ export function escapeHtml(text: string): string {
     .replaceAll("'", "&#39;");
 }
 
-/** "Monday, 20 July 2026" — fixed en-GB locale so output doesn't vary by machine. */
-function formatWindowDate(windowEnd: Date): string {
-  return windowEnd.toLocaleDateString("en-GB", {
-    timeZone: "UTC",
+/** "Monday, 20 July 2026" on arXiv's US Eastern calendar. */
+function formatAnnouncementDate(announcedAt: Date): string {
+  return announcedAt.toLocaleDateString("en-GB", {
+    timeZone: "America/New_York",
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -25,12 +25,11 @@ function formatWindowDate(windowEnd: Date): string {
  * Papers scoring >= minScore get a full card; the rest (including papers left
  * unscored by a failed call) get a one-line mention at the bottom.
  *
- * `windowEnd` is the window's cutoff date; multi-day (weekend) windows are
- * labelled by their cutoff alone.
+ * `announcedAt` is the scheduled arXiv announcement time.
  */
 export function buildDigest(
   papers: Paper[],
-  windowEnd: Date,
+  announcedAt: Date,
   minScore: number,
 ): { subject: string; body: string } {
   const kept = papers
@@ -39,7 +38,7 @@ export function buildDigest(
   const top = kept.filter((p) => (p.score ?? 0) >= minScore);
   const rest = kept.filter((p) => (p.score ?? 0) < minScore);
 
-  const subject = `Paperino (${formatWindowDate(windowEnd)})`;
+  const subject = `Paperino (${formatAnnouncementDate(announcedAt)})`;
   const heading = `<h1 style="margin-bottom:4px">${escapeHtml(subject)}</h1>`;
 
   if (kept.length === 0) {

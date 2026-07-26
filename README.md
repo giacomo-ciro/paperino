@@ -22,11 +22,8 @@ Claude Code delivers hyper-precise filtering tailored to your exact research pro
 
 Scanning the results then takes just 5-10 minutes, and you stay up to date with the latest research.
 
-<!-- <p align="center">
-  <img src="https://raw.githubusercontent.com/giacomo-ciro/paperino/main/public/paperino.gif" alt="Paperino demo" width="100%">
-</p> -->
 <p align="center">
-  <img src="public/paperino.gif" alt="Paperino demo" width="100%">
+  <img src="public/paperino-ui.png" alt="Paperino demo" width="100%">
 </p>
 
 ## Getting Started
@@ -57,11 +54,10 @@ Some examples:
 ```
 paperino --configure                     # open the config file in your default editor
 paperino --logs                          # tail the log file; no pipeline run
-paperino --force                         # discard the run/digest for the selected window(s) and start fresh
+paperino --force                         # discard the run/digest for the selected announcement(s) and start fresh
 paperino --only-fetch                    # only fetch papers, skip the scoring pipeline
-paperino --start-from 3                  # run on the window from 3 windows ago instead of the most recent
-paperino --start-from 3 --windows 3      # catch up on the last 3 windows, oldest of which starts 3 windows back
-paperino --max-papers 50                 # cap each window at 50 papers (most recently submitted first)
+paperino --last 3                        # catch up on the latest 3 arXiv announcements
+paperino --max-papers 50                 # cap each announcement at 50 papers (most recently submitted first)
 paperino -y --quiet                      # skip the confirmation prompt and only print the digest path — what a cron job wants
 ```
 
@@ -78,11 +74,11 @@ and add:
 
 ## How It Works
 
-**Preliminaries:** arXiv publishes new papers 5 times a week, on Sun, Mon, Tue, Wed and Thu at 20:00 CET. Each publication includes papers submitted during the preceding submission window (14:00 CET to 14:00 the following day), except weekend submissions, which are aggregated and published Monday night. Full details on the [official page](https://info.arxiv.org/help/availability.html#Announcement%20Schedule).
+**Preliminaries:** arXiv announces new papers 5 times a week, on Sun, Mon, Tue, Wed and Thu at 20:00 US Eastern time. Full details are on the [official announcement schedule](https://info.arxiv.org/help/availability.html#Announcement%20Schedule).
 
 Paperino is minimal, built to work efficiently. It follows a 3-step process:
 
-1. **Fetching papers:** fetch all arXiv papers published in a given window (by default, the latest submission window relative to when the command is run). This step only filters by arXiv category (cs.LM, cs.CV, etc.).
+1. **Fetching papers:** fetch the papers from the selected arXiv announcement (by default, the latest one). This step only filters by arXiv category (cs.LM, cs.CV, etc.).
 2. **Coarse filtering:** Claude receives your research context and a batch of titles per call (default 20), and outputs a binary relevant/not-relevant judgment. This step is kept coarse: Claude defaults to marking papers as potentially relevant when unsure.
 3. **Fine filtering:** Claude receives a smaller batch of title+abstract pairs per call and scores each paper on a scale of 1-10. Papers scoring above 6 get a full summary in the HTML digest; the rest get a one-line mention.
 

@@ -2,10 +2,17 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node
 import { dirname, join } from "node:path";
 import type { Paper } from "./types.js";
 
-/** `YYYY-MM-DD` for a UTC instant (matches Python's `strftime("%Y-%m-%d")`). */
-export function formatUTCDate(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+/** `YYYY-MM-DD` on arXiv's US Eastern calendar. */
+export function formatAnnouncementDate(d: Date): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(d).map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 /**
@@ -44,14 +51,14 @@ export function checkWritableDir(dir: string): string | null {
   return null;
 }
 
-/** One cache file per submission window, named by its end date (idempotent across re-runs). */
-export function cachePath(cacheDir: string, windowEnd: Date): string {
-  return join(cacheDir, `${formatUTCDate(windowEnd)}.json`);
+/** One cache file per announcement date (idempotent across re-runs). */
+export function cachePath(cacheDir: string, announcedAt: Date): string {
+  return join(cacheDir, `${formatAnnouncementDate(announcedAt)}.json`);
 }
 
-/** Delete a window's cached papers so it refetches and rescores from scratch. */
-export function clearCache(cacheDir: string, windowEnd: Date): void {
-  rmSync(cachePath(cacheDir, windowEnd), { force: true });
+/** Delete an announcement's cached papers so it refetches and rescores from scratch. */
+export function clearCache(cacheDir: string, announcedAt: Date): void {
+  rmSync(cachePath(cacheDir, announcedAt), { force: true });
 }
 
 export function loadPapers(path: string): Paper[] {
@@ -84,10 +91,10 @@ export function mergePapers(existing: Paper[], fetched: Paper[]): Paper[] {
   return [...byId.values()];
 }
 
-/** One flat HTML file per window: <out-dir>/YYYY-MM-DD.html. */
-export function writeDigest(outDir: string, windowEnd: Date, html: string): string {
+/** One flat HTML file per announcement: <out-dir>/YYYY-MM-DD.html. */
+export function writeDigest(outDir: string, announcedAt: Date, html: string): string {
   mkdirSync(outDir, { recursive: true });
-  const path = join(outDir, `${formatUTCDate(windowEnd)}.html`);
+  const path = join(outDir, `${formatAnnouncementDate(announcedAt)}.html`);
   writeFileSync(path, html, "utf-8");
   return path;
 }

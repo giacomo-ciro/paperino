@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import cliSpinners from "cli-spinners";
 import pc from "picocolors";
 import type { Config } from "./types.js";
+import type { ArxivAnnouncement } from "./window.js";
 
 const STAGE_LABELS = ["Fetching papers", "Coarse filtering", "Fine filtering"] as const;
 export type Stage = 0 | 1 | 2;
@@ -73,56 +74,27 @@ class Frame {
 }
 
 const ET_TIME_ZONE = "America/New_York";
-const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-const weekdayFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: ET_TIME_ZONE });
-const etTimeFormatter = new Intl.DateTimeFormat("en-US", {
+const announcementDateFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: ET_TIME_ZONE,
+  weekday: "short",
   year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-const localTimeFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: LOCAL_TIME_ZONE,
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZoneName: "short",
+  month: "short",
+  day: "numeric",
 });
 
-/** `YYYY-MM-DD (Ddd)` in ET, for the confirmation summary. */
-function formatETDate(d: Date): string {
-  const parts = Object.fromEntries(etTimeFormatter.formatToParts(d).map((p) => [p.type, p.value]));
-  const date = `${parts.year}-${parts.month}-${parts.day}`;
-  const weekday = weekdayFormatter.format(d);
-  return `${date} (${weekday})`;
-}
-
-/** `14:00 ET (your timezone: HH:mm <zone>)` — the cutoff time shared by both window boundaries. */
-function formatCutoffTime(d: Date): string {
-  const parts = Object.fromEntries(etTimeFormatter.formatToParts(d).map((p) => [p.type, p.value]));
-  const etTime = `${parts.hour}:${parts.minute} ET`;
-
-  if (LOCAL_TIME_ZONE === ET_TIME_ZONE) {
-    return etTime;
-  }
-
-  const localParts = Object.fromEntries(localTimeFormatter.formatToParts(d).map((p) => [p.type, p.value]));
-  const localTime = `${localParts.hour}:${localParts.minute} ${localParts.timeZoneName}`;
-  return `${etTime} (your timezone: ${localTime})`;
+/** `Mon, 27 Jul 2026` on arXiv's US Eastern calendar. */
+function formatAnnouncementDate(d: Date): string {
+  return announcementDateFormatter.format(d);
 }
 
 /**
- * Renders the run summary (windows, config, warnings) in the same visual
+ * Renders the run summary (announcements, config, warnings) in the same visual
  * language as the stage tracker, then prompts for confirmation. The whole
  * block is wiped from the screen right before returning, so it doesn't
  * linger once the animated stage tracker takes over.
  */
 export async function confirmRun(
-  windows: [Date, Date][],
+  announcements: ArxivAnnouncement[],
   cfg: Config,
   maxPapers: number | undefined,
   force: boolean,
@@ -141,30 +113,29 @@ export async function confirmRun(
     );
   }
   lines.push("");
-  lines.push(`${windows.length} submission window(s) to process${onlyFetch ? " (only fetching)" : ""}:`);
+  const announcementLabel =
+    announcements.length === 1
+      ? "1 arXiv announcement to process"
+      : `${announcements.length} arXiv announcements to process`;
+  lines.push(`${announcementLabel}${onlyFetch ? " (only fetching)" : ""}:`);
   lines.push("");
-  for (const [start, end] of windows) {
-    lines.push(`  ${pc.cyan("›")} ${formatETDate(start)} ${pc.dim("->")} ${formatETDate(end)}`);
-  }
-  if (windows.length > 0) {
-    const cutoff = formatCutoffTime(windows[windows.length - 1][1]);
-    lines.push("");
-    lines.push(pc.dim(`Each window starts and ends at ${cutoff}`));
+  for (const announcement of announcements) {
+    lines.push(`  ${pc.cyan("›")} ${formatAnnouncementDate(announcement.announcedAt)}`);
   }
   lines.push("");
   const maxProcessed = maxPapers !== undefined ? String(maxPapers) : "all";
-  lines.push(`${pc.dim("Max papers/window")}  ${maxProcessed}`);
+  lines.push(`${pc.dim("Max papers/announcement")}  ${maxProcessed}`);
   if (!onlyFetch) {
     lines.push(
-      `${pc.dim("Coarse model")}       ${cfg.coarse.model} (${cfg.coarse.callSize} papers per call, ${cfg.coarse.maxWorkers} concurrent calls at most)`,
+      `${pc.dim("Coarse model")}            ${cfg.coarse.model} (${cfg.coarse.callSize} papers per call, ${cfg.coarse.maxWorkers} concurrent calls at most)`,
     );
     lines.push(
-      `${pc.dim("Fine model")}         ${cfg.fine.model} (${cfg.fine.callSize} papers per call, ${cfg.fine.maxWorkers} concurrent calls at most)`,
+      `${pc.dim("Fine model")}              ${cfg.fine.model} (${cfg.fine.callSize} papers per call, ${cfg.fine.maxWorkers} concurrent calls at most)`,
     );
   }
   if (force) {
     lines.push("");
-    lines.push(pc.yellow("existing runs/digests for these windows will be discarded and rerun from scratch."));
+    lines.push(pc.yellow("existing runs/digests for these announcements will be discarded and rerun from scratch."));
   }
   lines.push("");
   lines.push(pc.dim("Press Enter to proceed (any other key to abort)"));
@@ -186,7 +157,7 @@ export async function confirmRun(
 }
 
 /**
- * Animated 3-line stage tracker for one submission window, written to stderr.
+ * Animated 3-line stage tracker for one arXiv announcement, written to stderr.
  * Redraws the whole block in place on each spinner tick; completed stages
  * freeze as a green checkmark, the active stage spins, pending stages stay dim.
  */
@@ -199,7 +170,7 @@ export interface PipelineView {
   stop(): void;
 }
 
-export function makePipelineView(windowLabel: string, stageLabels: readonly string[] = STAGE_LABELS): PipelineView {
+export function makePipelineView(announcementLabel: string, stageLabels: readonly string[] = STAGE_LABELS): PipelineView {
   let index = 0;
   let frameNum = 0;
   let stopped = false;
@@ -225,7 +196,7 @@ export function makePipelineView(windowLabel: string, stageLabels: readonly stri
     frame.draw(stageLabels.map((_, i) => renderLine(i)));
   }
 
-  process.stderr.write(`\nProcessing window ${windowLabel}\n\n`);
+  process.stderr.write(`\nProcessing announcement ${announcementLabel}\n\n`);
   draw();
   timer = setInterval(() => {
     frameNum++;

@@ -6,7 +6,7 @@ import {
   cachePath,
   checkWritableDir,
   clearCache,
-  formatUTCDate,
+  formatAnnouncementDate,
   loadPapers,
   mergePapers,
   savePapers,
@@ -39,9 +39,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("formatUTCDate", () => {
-  it("formats a UTC instant as YYYY-MM-DD", () => {
-    expect(formatUTCDate(new Date(Date.UTC(2026, 0, 5, 14, 0, 0)))).toBe("2026-01-05");
+describe("formatAnnouncementDate", () => {
+  it("formats an instant using arXiv's Eastern calendar date", () => {
+    expect(formatAnnouncementDate(new Date("2026-07-27T00:00:00Z"))).toBe("2026-07-26");
   });
 });
 
@@ -95,14 +95,14 @@ describe("checkWritableDir", () => {
 });
 
 describe("cachePath", () => {
-  it("is a flat file named by the window-end UTC date", () => {
-    const out = cachePath(dir, new Date(Date.UTC(2026, 0, 5, 14, 0, 0)));
-    expect(out).toBe(join(dir, "2026-01-05.json"));
+  it("is a flat file named by the announcement date", () => {
+    const out = cachePath(dir, new Date("2026-07-27T00:00:00Z"));
+    expect(out).toBe(join(dir, "2026-07-26.json"));
   });
 });
 
 describe("clearCache", () => {
-  it("removes only the given window's cache file", () => {
+  it("removes only the given announcement's cache file", () => {
     const target = new Date(Date.UTC(2026, 0, 5, 14, 0, 0));
     const other = new Date(Date.UTC(2026, 0, 6, 14, 0, 0));
     savePapers(cachePath(dir, target), [paper("a")]);
@@ -114,7 +114,7 @@ describe("clearCache", () => {
     expect(loadPapers(cachePath(dir, other))).toHaveLength(1);
   });
 
-  it("is a no-op when the window was never cached", () => {
+  it("is a no-op when the announcement was never cached", () => {
     expect(() => clearCache(dir, new Date())).not.toThrow();
   });
 });
@@ -137,7 +137,7 @@ describe("mergePapers", () => {
 });
 
 describe("loadPapers/savePapers", () => {
-  it("writes the cache file even for an empty window", () => {
+  it("writes the cache file even for an empty announcement", () => {
     const path = cachePath(dir, new Date());
     savePapers(path, []);
     expect(loadPapers(path)).toEqual([]);
@@ -162,9 +162,9 @@ describe("loadPapers/savePapers", () => {
 });
 
 describe("writeDigest", () => {
-  it("writes a flat YYYY-MM-DD.html named by the window end", () => {
-    const path = writeDigest(dir, new Date(Date.UTC(2026, 0, 5, 14, 0, 0)), "<p>hello</p>");
-    expect(path).toBe(join(dir, "2026-01-05.html"));
+  it("writes a flat YYYY-MM-DD.html named by the announcement date", () => {
+    const path = writeDigest(dir, new Date("2026-07-27T00:00:00Z"), "<p>hello</p>");
+    expect(path).toBe(join(dir, "2026-07-26.html"));
     expect(readFileSync(path, "utf-8")).toBe("<p>hello</p>");
   });
 

@@ -12,8 +12,8 @@ function timestamp(): string {
 
 /** Appends timestamped lines to `logPath` (mkdir -p'd once, up front). */
 export interface Logger {
-  pipelineStart(windowCount: number): void;
-  windowStart(label: string): void;
+  pipelineStart(announcementCount: number): void;
+  announcementStart(label: string): void;
   stageStart(label: string): void;
   callFailed(stageLabel: string, error: string): void;
   stageEnd(label: string, metrics: string): void;
@@ -29,11 +29,11 @@ export function makeLogger(logPath: string): Logger {
   }
 
   return {
-    pipelineStart(windowCount: number): void {
-      write(`pipeline started (${windowCount} window(s) to process)`);
+    pipelineStart(announcementCount: number): void {
+      write(`pipeline started (${announcementCount} announcement(s) to process)`);
     },
-    windowStart(label: string): void {
-      write(`processing window ${label}`);
+    announcementStart(label: string): void {
+      write(`processing announcement ${label}`);
     },
     stageStart(label: string): void {
       write(`  stage started: ${label}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { submissionWindow, windowsToProcess } from "./window.js";
+import { announcementsToProcess, latestAnnouncement, submissionWindow } from "./window.js";
 
 function et(iso: string): Date {
   // iso is a naive "YYYY-MM-DDTHH:mm:ss" ET wall-clock string; convert via a UTC offset probe.
@@ -97,49 +97,45 @@ describe("submissionWindow", () => {
   });
 });
 
-describe("windowsToProcess", () => {
-  it("defaults (start-from=1, limit=1) return just the latest window", () => {
-    const now = new Date();
-    const windows = windowsToProcess(now, 1, 1);
-    const latest = submissionWindow(now);
-    expect(windows).toHaveLength(1);
-    expect(utcLabel(windows[0][1])).toBe(utcLabel(latest[1]));
+describe("latestAnnouncement", () => {
+  it("labels Friday's cutoff as the Sunday announcement", () => {
+    const announcement = latestAnnouncement(et("2026-01-11T21:00:00"));
+    expect(utcLabel(announcement.announcedAt)).toBe(utcLabel(et("2026-01-11T20:00:00")));
+    expect(utcLabel(announcement.submittedUntil)).toBe(utcLabel(et("2026-01-09T14:00:00")));
   });
 
-  it("start-from 3, limit 2 returns [#3, #2] oldest-first", () => {
-    const now = new Date();
-    const windows = windowsToProcess(now, 3, 2);
-    expect(windows).toHaveLength(2);
+  it("labels weekday cutoffs as same-day announcements", () => {
+    const announcement = latestAnnouncement(et("2026-01-06T21:00:00"));
+    expect(utcLabel(announcement.announcedAt)).toBe(utcLabel(et("2026-01-06T20:00:00")));
+  });
+});
 
-    // recompute #1..#3 by stepping backward
-    const w1 = submissionWindow(now);
-    const w2 = submissionWindow(new Date(w1[0].getTime() - 1));
-    const w3 = submissionWindow(new Date(w2[0].getTime() - 1));
-
-    expect(utcLabel(windows[0][1])).toBe(utcLabel(w3[1])); // oldest first: #3
-    expect(utcLabel(windows[1][1])).toBe(utcLabel(w2[1])); // then #2
+describe("announcementsToProcess", () => {
+  it("returns only the latest announcement when count is 1", () => {
+    const now = et("2026-01-12T21:00:00");
+    const announcements = announcementsToProcess(now, 1);
+    expect(announcements).toEqual([latestAnnouncement(now)]);
   });
 
-  it("clamps at #1 when limit would walk past the newest window", () => {
-    const now = new Date();
-    const windows = windowsToProcess(now, 2, 5);
-    expect(windows).toHaveLength(2); // stops at #1, doesn't error
-
-    const w1 = submissionWindow(now);
-    const w2 = submissionWindow(new Date(w1[0].getTime() - 1));
-
-    expect(utcLabel(windows[0][1])).toBe(utcLabel(w2[1])); // oldest: #2
-    expect(utcLabel(windows[1][1])).toBe(utcLabel(w1[1])); // newest: #1
+  it("returns the latest N announcements oldest-first", () => {
+    const announcements = announcementsToProcess(et("2026-01-12T21:00:00"), 3);
+    expect(announcements.map((a) => utcLabel(a.announcedAt))).toEqual([
+      utcLabel(et("2026-01-08T20:00:00")),
+      utcLabel(et("2026-01-11T20:00:00")),
+      utcLabel(et("2026-01-12T20:00:00")),
+    ]);
   });
 
-  it("N calls yield N distinct, strictly-older, gap-free windows", () => {
-    const now = new Date();
-    const windows = windowsToProcess(now, 5, 5);
-    expect(windows).toHaveLength(5);
-    for (let i = 1; i < windows.length; i++) {
-      expect(windows[i][1].getTime()).toBeGreaterThan(windows[i - 1][1].getTime());
-      // gap-free: this window's start immediately follows the previous window's end
-      expect(windows[i][0].getTime()).toBeGreaterThan(windows[i - 1][1].getTime());
+  it("returns distinct, contiguous submission periods", () => {
+    const announcements = announcementsToProcess(et("2026-01-12T21:00:00"), 5);
+    expect(announcements).toHaveLength(5);
+    for (let i = 1; i < announcements.length; i++) {
+      expect(announcements[i].announcedAt.getTime()).toBeGreaterThan(
+        announcements[i - 1].announcedAt.getTime(),
+      );
+      expect(announcements[i].submittedFrom.getTime()).toBe(
+        announcements[i - 1].submittedUntil.getTime(),
+      );
     }
   });
 });

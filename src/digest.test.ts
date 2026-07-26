@@ -23,11 +23,11 @@ describe("escapeHtml", () => {
   });
 });
 
-const WINDOW_END = new Date("2026-01-05T19:00:00Z"); // Monday
+const ANNOUNCED_AT = new Date("2026-01-06T01:00:00Z"); // Monday 20:00 ET
 
 describe("buildDigest", () => {
   it("returns the empty-state body when there are no coarse-passed papers", () => {
-    const { subject, body } = buildDigest([paper("a", { coarse: 0 })], WINDOW_END, 6);
+    const { subject, body } = buildDigest([paper("a", { coarse: 0 })], ANNOUNCED_AT, 6);
     expect(subject).toBe("Paperino (Monday, 5 January 2026)");
     expect(body).toContain("<h1");
     expect(body).toContain("Paperino (Monday, 5 January 2026)");
@@ -43,7 +43,7 @@ describe("buildDigest", () => {
       paper("dropped", { coarse: 0 }), // filtered out entirely
     ];
 
-    const { subject, body } = buildDigest(papers, WINDOW_END, 6);
+    const { subject, body } = buildDigest(papers, ANNOUNCED_AT, 6);
 
     expect(subject).toBe("Paperino (Monday, 5 January 2026)");
     expect(body).toContain("3/4 papers passed the coarse filter, 1 scored ≥ 6.");
@@ -62,7 +62,7 @@ describe("buildDigest", () => {
       paper("mid", { coarse: 1, score: 7 }),
       paper("top", { coarse: 1, score: 10 }),
     ];
-    const { body } = buildDigest(papers, WINDOW_END, 6);
+    const { body } = buildDigest(papers, ANNOUNCED_AT, 6);
     expect(body.indexOf("Title top")).toBeLessThan(body.indexOf("Title mid"));
   });
 
@@ -79,7 +79,7 @@ describe("buildDigest", () => {
         ],
       }),
     ];
-    const { body } = buildDigest(papers, WINDOW_END, 6);
+    const { body } = buildDigest(papers, ANNOUNCED_AT, 6);
 
     expect(body).toContain(
       "Ada Lovelace<sup>1</sup>, Alan Turing<sup>2</sup>, " +
@@ -99,14 +99,14 @@ describe("buildDigest", () => {
         ],
       }),
     ];
-    const { body } = buildDigest(papers, WINDOW_END, 6);
+    const { body } = buildDigest(papers, ANNOUNCED_AT, 6);
 
     expect(body).toContain("Ada Lovelace, Alan Turing");
     expect(body).not.toContain("<sup>");
   });
 
   it("omits the author block entirely when there are no authors", () => {
-    const { body } = buildDigest([paper("x", { coarse: 1, score: 9 })], WINDOW_END, 6);
+    const { body } = buildDigest([paper("x", { coarse: 1, score: 9 })], ANNOUNCED_AT, 6);
     expect(body).not.toContain("<sup>");
     expect(body).not.toContain("color:#555;margin:2px 0 2px");
   });
@@ -119,7 +119,7 @@ describe("buildDigest", () => {
         authors: [{ name: "<script>alert(1)</script>", affiliation: "Foo & Bar" }],
       }),
     ];
-    const { body } = buildDigest(papers, WINDOW_END, 6);
+    const { body } = buildDigest(papers, ANNOUNCED_AT, 6);
     expect(body).not.toContain("<script>alert(1)</script>");
     expect(body).toContain("&lt;script&gt;");
     expect(body).toContain("Foo &amp; Bar");
@@ -134,7 +134,7 @@ describe("buildDigest", () => {
         summary: "a & b",
       }),
     ];
-    const { body } = buildDigest(papers, WINDOW_END, 6);
+    const { body } = buildDigest(papers, ANNOUNCED_AT, 6);
     expect(body).not.toContain("<script>alert(1)</script>");
     expect(body).toContain("&lt;script&gt;");
     expect(body).toContain("a &amp; b");

@@ -1,6 +1,12 @@
 const ET_TIME_ZONE = "America/New_York";
 const CUTOFF_HOUR = 14; // arXiv's daily submission-window cutoff, ET
 
+export interface ArxivAnnouncement {
+  announcedAt: Date;
+  submittedFrom: Date;
+  submittedUntil: Date;
+}
+
 /** A wall-clock moment in some timezone, with no attached offset. */
 interface WallClock {
   year: number;
@@ -108,12 +114,19 @@ function compareWallClock(a: WallClock, b: WallClock): number {
   return aMs - bMs;
 }
 
+/** The scheduled public-announcement time for a submission-window cutoff. */
+function announcementTime(windowEnd: WallClock): WallClock {
+  return weekday(windowEnd) === 4
+    ? addHours(addDays(windowEnd, 2), 6)
+    : addHours(windowEnd, 6);
+}
+
 /**
  * Find the most recent submission window already announced, as of `now`.
  *
  * arXiv's daily submission-window cutoff is 14:00 ET; results are announced 20:00 ET
- * the same day, except Friday's cutoff (which covers the whole weekend) is announced
- * the following Sunday 20:00. Sat/Sun are never a window's end. A window ending on
+ * the same day, except Friday's cutoff is announced the following Sunday 20:00.
+ * Sat/Sun are never a window's end. A window ending on
  * Monday spans 3 days (it absorbs the weekend); every other window spans 1 day.
  *
  * Returns [start, end] as UTC Dates.
@@ -136,7 +149,7 @@ export function submissionWindow(now: Date): [Date, Date] {
       continue;
     }
 
-    const announcedAt = wd === 4 ? addHours(addDays(windowEnd, 2), 6) : addHours(windowEnd, 6);
+    const announcedAt = announcementTime(windowEnd);
 
     if (compareWallClock(nowEt, announcedAt) >= 0) {
       break;
@@ -151,26 +164,26 @@ export function submissionWindow(now: Date): [Date, Date] {
   return [etWallClockToUtc(windowStart), etWallClockToUtc(windowEnd)];
 }
 
-/**
- * Enumerate the windows to process for `--start-from`/`--windows`, both 1-indexed.
- * Window #1 is the latest announced window, #2 the one before it, etc.
- * `startFrom` anchors backward in time; `limit` walks forward (toward more recent)
- * from the anchor, clamped at #1 (never into the future).
- *
- * Returns windows oldest-first.
- */
-export function windowsToProcess(now: Date, startFrom: number, limit: number): [Date, Date][] {
-  // newest index actually wanted: startFrom walking forward (limit-1) steps, clamped at #1
-  const newestIndex = Math.max(1, startFrom - (limit - 1));
+/** Find the most recent scheduled arXiv announcement already made as of `now`. */
+export function latestAnnouncement(now: Date): ArxivAnnouncement {
+  const [submittedFrom, submittedUntil] = submissionWindow(now);
+  const cutoff = utcToEtWallClock(submittedUntil);
+  return {
+    announcedAt: etWallClockToUtc(announcementTime(cutoff)),
+    submittedFrom,
+    submittedUntil,
+  };
+}
 
-  const windows: [Date, Date][] = [];
-  let [start, end] = submissionWindow(now);
-  for (let index = 1; index <= startFrom; index++) {
-    if (index >= newestIndex) {
-      windows.push([start, end]);
-    }
-    [start, end] = submissionWindow(new Date(start.getTime() - 1));
+/** Return the latest `count` scheduled announcements, oldest first. */
+export function announcementsToProcess(now: Date, count: number): ArxivAnnouncement[] {
+  const announcements: ArxivAnnouncement[] = [];
+  let announcement = latestAnnouncement(now);
+
+  for (let index = 0; index < count; index++) {
+    announcements.push(announcement);
+    announcement = latestAnnouncement(new Date(announcement.announcedAt.getTime() - 1));
   }
 
-  return windows.reverse(); // oldest-first
+  return announcements.reverse();
 }
