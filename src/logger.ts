@@ -15,6 +15,8 @@ export interface Logger {
   pipelineStart(announcementCount: number): void;
   announcementStart(label: string): void;
   stageStart(label: string): void;
+  fetchDiagnostic(message: string): void;
+  stageFailed(stageLabel: string, error: string): void;
   callFailed(stageLabel: string, error: string): void;
   stageEnd(label: string, metrics: string): void;
   pipelineEnd(): void;
@@ -37,6 +39,12 @@ export function makeLogger(logPath: string): Logger {
     },
     stageStart(label: string): void {
       write(`  stage started: ${label}`);
+    },
+    fetchDiagnostic(message: string): void {
+      write(`  ${message}`);
+    },
+    stageFailed(stageLabel: string, error: string): void {
+      write(`  stage failed: ${stageLabel} — ${error}`);
     },
     callFailed(stageLabel: string, error: string): void {
       write(`  call failed: ${stageLabel} — ${error}`);

@@ -216,6 +216,7 @@ export function makePipelineView(announcementLabel: string, stageLabels: readonl
       }
     },
     stop(): void {
+      if (stopped) return;
       if (timer) clearInterval(timer);
       stopped = true;
       draw();

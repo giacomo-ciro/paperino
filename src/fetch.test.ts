@@ -23,6 +23,7 @@ const SAMPLE_FEED = `<?xml version="1.0" encoding="UTF-8"?>
     <author>
       <name>Ada Lovelace</name>
       <arxiv:affiliation>INRAE</arxiv:affiliation>
+      <arxiv:affiliation>CNRS</arxiv:affiliation>
     </author>
     <author>
       <name>Alan Turing</name>
@@ -93,6 +94,7 @@ const NUMERIC_FEED = `<?xml version="1.0" encoding="UTF-8"?>
 </feed>`;
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -116,7 +118,7 @@ describe("fetchRecentPapers", () => {
       abstract: "This is the abstract of the single-category paper.",
       link: "http://arxiv.org/abs/2601.00001v1",
       authors: [
-        { name: "Ada Lovelace", affiliation: "INRAE" },
+        { name: "Ada Lovelace", affiliation: "INRAE; CNRS" },
         { name: "Alan Turing", affiliation: null },
       ],
       categories: ["cs.CV"],
@@ -153,6 +155,76 @@ describe("fetchRecentPapers", () => {
       comment: null,
     });
 
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs page request and pagination details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => SAMPLE_FEED,
+      }),
+    );
+    const diagnostics: string[] = [];
+
+    await fetchRecentPapers(["cs.CV"], new Date(0), new Date(1), undefined, (message) => diagnostics.push(message));
+
+    expect(diagnostics).toEqual([
+      "arXiv page start=0: request attempt 1/3",
+      expect.stringMatching(/^arXiv page start=0: received \d+ bytes$/),
+      "arXiv page start=0: 3 papers returned (3 total)",
+    ]);
+  });
+
+  it("retries transient request failures and records the reason", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("socket closed"))
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => SAMPLE_FEED,
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const diagnostics: string[] = [];
+
+    const papers = fetchRecentPapers(["cs.CV"], new Date(0), new Date(1), undefined, (message) => diagnostics.push(message));
+    await vi.advanceTimersByTimeAsync(3000);
+
+    await expect(papers).resolves.toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(diagnostics).toContain(
+      "arXiv page start=0: request failed (TypeError: socket closed); retrying in 3s",
+    );
+  });
+
+  it("reports the minimal timeout error after retrying", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")));
+
+    const papers = fetchRecentPapers(["cs.CV"], new Date(0), new Date(1));
+    const expectation = expect(papers).rejects.toThrow("arXiv request timed out — please try again later");
+    await vi.advanceTimersByTimeAsync(6000);
+
+    await expectation;
+  });
+
+  it("does not retry a non-transient HTTP failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchRecentPapers(["cs.CV"], new Date(0), new Date(1))).rejects.toThrow(
+      "arXiv request failed — please try again later",
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

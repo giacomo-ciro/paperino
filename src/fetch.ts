@@ -4,6 +4,8 @@ import type { Author, Paper } from "./types.js";
 const ARXIV_API_BASE = "https://export.arxiv.org/api/query";
 const PAGE_SIZE = 100;
 const INTER_PAGE_DELAY_MS = 3000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_ATTEMPTS = 3;
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -27,7 +29,7 @@ interface AtomCategory {
 
 interface AtomAuthor {
   name: string;
-  affiliation?: string;
+  affiliation?: string | string[];
 }
 
 interface AtomEntry {
@@ -50,10 +52,13 @@ interface AtomFeed {
 }
 
 function toAuthor(a: AtomAuthor): Author {
-  const affiliation = a.affiliation?.trim() ?? "";
+  const affiliations = (Array.isArray(a.affiliation) ? a.affiliation : [a.affiliation])
+    .filter((affiliation): affiliation is string => typeof affiliation === "string")
+    .map((affiliation) => affiliation.trim())
+    .filter((affiliation) => affiliation !== "");
   return {
     name: a.name.trim(),
-    affiliation: affiliation === "" ? null : affiliation,
+    affiliation: affiliations.length === 0 ? null : affiliations.join("; "),
   };
 }
 
@@ -87,6 +92,64 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export type FetchDiagnostic = (message: string) => void;
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+async function fetchPage(url: URL, pageStart: number, diagnostic?: FetchDiagnostic): Promise<string> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    diagnostic?.(`arXiv page start=${pageStart}: request attempt ${attempt}/${MAX_ATTEMPTS}`);
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      if (response.ok) {
+        const xml = await response.text();
+        diagnostic?.(`arXiv page start=${pageStart}: received ${xml.length} bytes`);
+        return xml;
+      }
+
+      const error = new Error(`HTTP ${response.status} ${response.statusText}`);
+      if (!isRetryableStatus(response.status)) {
+        diagnostic?.(`arXiv page start=${pageStart}: request failed: ${errorDetail(error)}`);
+        throw new Error("arXiv request failed — please try again later");
+      }
+      lastError = error;
+    } catch (error) {
+      // The generic user-facing error intentionally omits transport details; those go in the log.
+      if (error instanceof Error && error.message === "arXiv request failed — please try again later") {
+        throw error;
+      }
+      lastError = error;
+    }
+
+    const detail = errorDetail(lastError);
+    if (attempt === MAX_ATTEMPTS) {
+      diagnostic?.(`arXiv page start=${pageStart}: request failed after ${MAX_ATTEMPTS} attempts: ${detail}`);
+      if (isTimeout(lastError)) {
+        throw new Error("arXiv request timed out — please try again later");
+      }
+      throw new Error("arXiv request failed — please try again later");
+    }
+
+    diagnostic?.(`arXiv page start=${pageStart}: request failed (${detail}); retrying in ${INTER_PAGE_DELAY_MS / 1000}s`);
+    await sleep(INTER_PAGE_DELAY_MS);
+  }
+
+  // The loop always either returns or throws; this keeps TypeScript's control flow explicit.
+  throw new Error("arXiv request failed — please try again later");
+}
+
 /**
  * Fetch every arXiv paper in `categories` submitted within [start, end] UTC.
  * If `maxPapers` is set, only the most recently submitted N are returned.
@@ -96,6 +159,7 @@ export async function fetchRecentPapers(
   start: Date,
   end: Date,
   maxPapers?: number,
+  diagnostic?: FetchDiagnostic,
 ): Promise<Paper[]> {
   const dateFilter = `submittedDate:[${formatArxivDate(start)} TO ${formatArxivDate(end)}]`;
   const catFilter = categories.map((c) => `cat:${c}`).join(" OR ");
@@ -109,7 +173,7 @@ export async function fetchRecentPapers(
     if (start_ > 0) {
       await sleep(INTER_PAGE_DELAY_MS);
     }
-
+    
     const url = new URL(ARXIV_API_BASE);
     url.searchParams.set("search_query", searchQuery);
     url.searchParams.set("start", String(start_));
@@ -117,15 +181,12 @@ export async function fetchRecentPapers(
     url.searchParams.set("sortBy", "submittedDate");
     url.searchParams.set("sortOrder", "descending");
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`arXiv API request failed: ${response.status} ${response.statusText}`);
-    }
-    const xml = await response.text();
+    const xml = await fetchPage(url, start_, diagnostic);
     const parsed = parser.parse(xml) as AtomFeed;
 
     totalResults = Number(parsed.feed.totalResults);
     const entries = parsed.feed.entry ?? [];
+    diagnostic?.(`arXiv page start=${start_}: ${entries.length} papers returned (${totalResults} total)`);
     if (entries.length === 0) {
       break;
     }

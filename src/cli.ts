@@ -83,6 +83,10 @@ function openInBrowser(path: string): void {
   spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
 }
 
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
 function renderDigestHtml(subject: string, body: string): string {
   return `<!doctype html>
 <html>
@@ -216,19 +220,22 @@ program
 
         logger.announcementStart(label);
 
-        const view: PipelineView = options.quiet
+        const view: PipelineView = options.quiet || !process.stderr.isTTY
           ? makeSilentPipelineView()
           : makePipelineView(label, options.onlyFetch ? ["Fetching papers"] : undefined);
+        let activeStage = "Fetching papers";
 
-        logger.stageStart("Fetching papers");
-        const existing = loadPapers(cacheFile);
-        const fetched = await fetchRecentPapers(
-          cfg.arxivCat,
-          submittedFrom,
-          submittedUntil,
-          maxPapers,
-        );
-        const papers = mergePapers(existing, fetched);
+        try {
+          logger.stageStart(activeStage);
+          const existing = loadPapers(cacheFile);
+          const fetched = await fetchRecentPapers(
+            cfg.arxivCat,
+            submittedFrom,
+            submittedUntil,
+            maxPapers,
+            (message) => logger.fetchDiagnostic(message),
+          );
+          const papers = mergePapers(existing, fetched);
         savePapers(cacheFile, papers);
 
         const toProcess = capMostRecent(papers, maxPapers);
@@ -246,7 +253,8 @@ program
           continue;
         }
 
-        logger.stageStart("Coarse filtering");
+        activeStage = "Coarse filtering";
+        logger.stageStart(activeStage);
         let lastCoarse: ScoringProgress | undefined;
         await coarseFilter(
           toProcess,
@@ -264,7 +272,8 @@ program
         logger.stageEnd("Coarse filtering", coarseMetrics);
         savePapers(cacheFile, papers);
 
-        logger.stageStart("Fine filtering");
+        activeStage = "Fine filtering";
+        logger.stageStart(activeStage);
         let lastFine: ScoringProgress | undefined;
         await fineScoring(
           toProcess,
@@ -317,6 +326,15 @@ program
         if (!options.quiet) {
           openInBrowser(htmlPath);
         }
+        } catch (error) {
+          logger.stageFailed(activeStage, errorDetail(error));
+          view.stop();
+          // Fetch errors are already concise and actionable; all other details stay in the log.
+          if (error instanceof Error && error.message.startsWith("arXiv request ")) {
+            throw error;
+          }
+          throw new Error("paperino failed — please try again later. Run paperino --logs for details.");
+        }
       }
 
       logger.pipelineEnd();
@@ -335,6 +353,6 @@ program
 
 program.parseAsync().catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`error: ${message}\n`);
+  process.stderr.write(`${pc.yellow(`${message}`)}\n`);
   process.exitCode = 1;
 });
