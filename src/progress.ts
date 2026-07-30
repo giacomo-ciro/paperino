@@ -1,6 +1,8 @@
 import { createInterface } from "node:readline/promises";
+import { performance } from "node:perf_hooks";
 import cliSpinners from "cli-spinners";
 import pc from "picocolors";
+import { formatRuntime } from "./runtime.js";
 import type { Config } from "./types.js";
 import type { ArxivAnnouncement } from "./window.js";
 
@@ -157,7 +159,7 @@ export async function confirmRun(
 }
 
 /**
- * Animated 3-line stage tracker for one arXiv announcement, written to stderr.
+ * Animated stage tracker for one arXiv announcement, written to stderr.
  * Redraws the whole block in place on each spinner tick; completed stages
  * freeze as a green checkmark, the active stage spins, pending stages stay dim.
  */
@@ -174,10 +176,15 @@ export function makePipelineView(announcementLabel: string, stageLabels: readonl
   let index = 0;
   let frameNum = 0;
   let stopped = false;
+  const startedAt = performance.now();
   const text: string[] = [...stageLabels];
   const failedStages = new Set<number>();
   const frame = new Frame();
   let timer: NodeJS.Timeout | undefined;
+
+  function showCursor(): void {
+    process.stderr.write("\x1b[?25h");
+  }
 
   function renderLine(i: number): string {
     const step = pc.dim(`Step ${i + 1}`);
@@ -192,11 +199,20 @@ export function makePipelineView(announcementLabel: string, stageLabels: readonl
     return pc.dim(`Step ${i + 1} ○ ${text[i]}`);
   }
 
-  function draw(): void {
-    frame.draw(stageLabels.map((_, i) => renderLine(i)));
+  function renderHeader(): string {
+    if (stopped) {
+      return `Processing announcement ${announcementLabel}`;
+    }
+    return `Processing announcement ${announcementLabel} ${pc.dim(`· ${formatRuntime(performance.now() - startedAt)}`)}`;
   }
 
-  process.stderr.write(`\nProcessing announcement ${announcementLabel}\n\n`);
+  function draw(): void {
+    frame.draw([renderHeader(), "", ...stageLabels.map((_, i) => renderLine(i))]);
+  }
+
+  process.stderr.write("\x1b[?25l");
+  process.once("exit", showCursor);
+  process.stderr.write("\n");
   draw();
   timer = setInterval(() => {
     frameNum++;
@@ -220,6 +236,8 @@ export function makePipelineView(announcementLabel: string, stageLabels: readonl
       if (timer) clearInterval(timer);
       stopped = true;
       draw();
+      process.off("exit", showCursor);
+      showCursor();
       process.stderr.write("\n");
     },
   };

@@ -98,48 +98,50 @@ function errorDetail(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-function isTimeout(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "TimeoutError";
-}
-
 function isRetryableStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+/**
+ * Fetch one page, retrying transport errors and transient HTTP statuses.
+ * Throws the underlying technical error; the caller turns it into user-facing copy.
+ */
 async function fetchPage(url: URL, pageStart: number, diagnostic?: FetchDiagnostic): Promise<string> {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     diagnostic?.(`arXiv page start=${pageStart}: request attempt ${attempt}/${MAX_ATTEMPTS}`);
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-      if (response.ok) {
-        const xml = await response.text();
-        diagnostic?.(`arXiv page start=${pageStart}: received ${xml.length} bytes`);
-        return xml;
-      }
 
-      const error = new Error(`HTTP ${response.status} ${response.statusText}`);
-      if (!isRetryableStatus(response.status)) {
-        diagnostic?.(`arXiv page start=${pageStart}: request failed: ${errorDetail(error)}`);
-        throw new Error("arXiv request failed — please try again later");
+    let response: Response | undefined;
+    let xml: string | undefined;
+    try {
+      response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      if (response.ok) {
+        xml = await response.text();
       }
-      lastError = error;
     } catch (error) {
-      // The generic user-facing error intentionally omits transport details; those go in the log.
-      if (error instanceof Error && error.message === "arXiv request failed — please try again later") {
-        throw error;
-      }
+      // Covers both connection failures and a body that dies mid-read; both are retryable.
       lastError = error;
+      response = undefined;
+    }
+
+    if (xml !== undefined) {
+      diagnostic?.(`arXiv page start=${pageStart}: received ${xml.length} bytes`);
+      return xml;
+    }
+
+    if (response) {
+      lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
+      if (!isRetryableStatus(response.status)) {
+        diagnostic?.(`arXiv page start=${pageStart}: request failed: ${errorDetail(lastError)}`);
+        throw lastError;
+      }
     }
 
     const detail = errorDetail(lastError);
     if (attempt === MAX_ATTEMPTS) {
       diagnostic?.(`arXiv page start=${pageStart}: request failed after ${MAX_ATTEMPTS} attempts: ${detail}`);
-      if (isTimeout(lastError)) {
-        throw new Error("arXiv request timed out — please try again later");
-      }
-      throw new Error("arXiv request failed — please try again later");
+      throw lastError;
     }
 
     diagnostic?.(`arXiv page start=${pageStart}: request failed (${detail}); retrying in ${INTER_PAGE_DELAY_MS / 1000}s`);
@@ -147,7 +149,7 @@ async function fetchPage(url: URL, pageStart: number, diagnostic?: FetchDiagnost
   }
 
   // The loop always either returns or throws; this keeps TypeScript's control flow explicit.
-  throw new Error("arXiv request failed — please try again later");
+  throw lastError;
 }
 
 /**
@@ -173,7 +175,6 @@ export async function fetchRecentPapers(
     if (start_ > 0) {
       await sleep(INTER_PAGE_DELAY_MS);
     }
-    
     const url = new URL(ARXIV_API_BASE);
     url.searchParams.set("search_query", searchQuery);
     url.searchParams.set("start", String(start_));

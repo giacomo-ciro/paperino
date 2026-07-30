@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { spawn } from "node:child_process";
 import { Command, InvalidArgumentError } from "commander";
 import pc from "picocolors";
@@ -10,6 +11,7 @@ import { fetchRecentPapers } from "./fetch.js";
 import { runConfigure } from "./configure.js";
 import { makeLogger, viewLogs } from "./logger.js";
 import { confirmRun, makePipelineView, makeSilentPipelineView, type PipelineView } from "./progress.js";
+import { formatRuntime } from "./runtime.js";
 import { coarseFilter, fineScoring, type ScoringProgress } from "./scoring.js";
 import { checkForUpdateAsync, readCachedUpdate } from "./update-check.js";
 import {
@@ -65,6 +67,10 @@ function formatProgress(stage: "coarse" | "fine", p: ScoringProgress): string {
   );
 }
 
+function withRuntime(text: string, ms: number): string {
+  return `${text} ${pc.dim(`· ${formatRuntime(ms)}`)}`;
+}
+
 /** Progress snapshot for a stage that had nothing pending (all papers already screened/scored). */
 function alreadyDoneProgress(papers: Paper[], stage: "coarse" | "fine"): ScoringProgress {
   const passed =
@@ -83,8 +89,22 @@ function openInBrowser(path: string): void {
   spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
 }
 
+const LOGS_HINT = "Run paperino --logs for details.";
+
 function errorDetail(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const detail = `${error.name}: ${error.message}`;
+  return error.cause === undefined ? detail : `${detail} (cause: ${errorDetail(error.cause)})`;
+}
+
+/** The digest survived but delivery did not, so this error carries its own user-facing message. */
+class EmailDeliveryError extends Error {
+  constructor(message: string, options: { cause: unknown }) {
+    super(message, options);
+    this.name = "EmailDeliveryError";
+  }
 }
 
 function renderDigestHtml(subject: string, body: string): string {
@@ -217,6 +237,7 @@ program
         }
         const cacheFile = cachePath(cfg.cacheDir, announcedAt);
         const label = formatAnnouncementDate(announcedAt);
+        const announcementStartedAt = performance.now();
 
         logger.announcementStart(label);
 
@@ -227,6 +248,7 @@ program
 
         try {
           logger.stageStart(activeStage);
+          const fetchStartedAt = performance.now();
           const existing = loadPapers(cacheFile);
           const fetched = await fetchRecentPapers(
             cfg.arxivCat,
@@ -236,116 +258,128 @@ program
             (message) => logger.fetchDiagnostic(message),
           );
           const papers = mergePapers(existing, fetched);
-        savePapers(cacheFile, papers);
+          savePapers(cacheFile, papers);
 
-        const toProcess = capMostRecent(papers, maxPapers);
-        const cappedNote =
-          maxPapers !== undefined && toProcess.length < papers.length
-            ? ` (only scoring most recent ${toProcess.length})`
-            : "";
-        const fetchMetrics = `Fetched ${fetched.length} papers, ${papers.length} total in store${cappedNote}`;
-        view.complete(fetchMetrics);
-        logger.stageEnd("Fetching papers", fetchMetrics);
+          const toProcess = capMostRecent(papers, maxPapers);
+          const cappedNote =
+            maxPapers !== undefined && toProcess.length < papers.length
+              ? ` (only scoring most recent ${toProcess.length})`
+              : "";
+          const fetchMetrics = `Fetched ${fetched.length} papers, ${papers.length} total in store${cappedNote}`;
+          const fetchDurationMs = performance.now() - fetchStartedAt;
+          view.complete(withRuntime(fetchMetrics, fetchDurationMs));
+          logger.stageEnd("Fetching papers", fetchMetrics);
 
-        if (options.onlyFetch) {
+          if (options.onlyFetch) {
+            view.stop();
+            outputPaths.push(cacheFile);
+            if (!options.quiet) {
+              const totalDurationMs = performance.now() - announcementStartedAt;
+              process.stderr.write(`${pc.green("Done")} ${pc.dim(`in ${formatRuntime(totalDurationMs)}. Papers saved at`)} ${cacheFile}\n\n`);
+            }
+            continue;
+          }
+
+          activeStage = "Coarse filtering";
+          logger.stageStart(activeStage);
+          const coarseStartedAt = performance.now();
+          let lastCoarse: ScoringProgress | undefined;
+          await coarseFilter(
+            toProcess,
+            cfg,
+            agent,
+            (p) => {
+              lastCoarse = p;
+              view.update(formatProgress("coarse", p));
+            },
+            (err) => logger.callFailed("Coarse filtering", err),
+          );
+          const coarseProgress = lastCoarse ?? alreadyDoneProgress(toProcess, "coarse");
+          const coarseMetrics = formatProgress("coarse", coarseProgress);
+          const coarseDurationMs = performance.now() - coarseStartedAt;
+          view.complete(withRuntime(coarseMetrics, coarseDurationMs), coarseProgress.failed > 0);
+          logger.stageEnd("Coarse filtering", coarseMetrics);
+          savePapers(cacheFile, papers);
+
+          activeStage = "Fine filtering";
+          logger.stageStart(activeStage);
+          const fineStartedAt = performance.now();
+          let lastFine: ScoringProgress | undefined;
+          await fineScoring(
+            toProcess,
+            cfg,
+            agent,
+            (p) => {
+              lastFine = p;
+              view.update(formatProgress("fine", p));
+            },
+            (err) => logger.callFailed("Fine filtering", err),
+          );
+          const fineProgress = lastFine ?? alreadyDoneProgress(toProcess, "fine");
+          const fineMetrics = formatProgress("fine", fineProgress);
+          const fineDurationMs = performance.now() - fineStartedAt;
+          view.complete(withRuntime(fineMetrics, fineDurationMs), fineProgress.failed > 0);
+          logger.stageEnd("Fine filtering", fineMetrics);
+          savePapers(cacheFile, papers);
           view.stop();
-          outputPaths.push(cacheFile);
-          continue;
-        }
 
-        activeStage = "Coarse filtering";
-        logger.stageStart(activeStage);
-        let lastCoarse: ScoringProgress | undefined;
-        await coarseFilter(
-          toProcess,
-          cfg,
-          agent,
-          (p) => {
-            lastCoarse = p;
-            view.update(formatProgress("coarse", p));
-          },
-          (err) => logger.callFailed("Coarse filtering", err),
-        );
-        const coarseProgress = lastCoarse ?? alreadyDoneProgress(toProcess, "coarse");
-        const coarseMetrics = formatProgress("coarse", coarseProgress);
-        view.complete(coarseMetrics, coarseProgress.failed > 0);
-        logger.stageEnd("Coarse filtering", coarseMetrics);
-        savePapers(cacheFile, papers);
-
-        activeStage = "Fine filtering";
-        logger.stageStart(activeStage);
-        let lastFine: ScoringProgress | undefined;
-        await fineScoring(
-          toProcess,
-          cfg,
-          agent,
-          (p) => {
-            lastFine = p;
-            view.update(formatProgress("fine", p));
-          },
-          (err) => logger.callFailed("Fine filtering", err),
-        );
-        const fineProgress = lastFine ?? alreadyDoneProgress(toProcess, "fine");
-        const fineMetrics = formatProgress("fine", fineProgress);
-        view.complete(fineMetrics, fineProgress.failed > 0);
-        logger.stageEnd("Fine filtering", fineMetrics);
-        savePapers(cacheFile, papers);
-        view.stop();
-
-        const { subject, body } = buildDigest(papers, announcedAt, cfg.minScore);
-        const htmlPath = writeDigest(cfg.outDir, announcedAt, renderDigestHtml(subject, body));
-        if (email) {
-          try {
-            await sendDigestEmail(email, subject, body);
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            throw new Error(`email delivery failed; digest remains at ${htmlPath}: ${message}`);
+          const { subject, body } = buildDigest(papers, announcedAt, cfg.minScore);
+          const htmlPath = writeDigest(cfg.outDir, announcedAt, renderDigestHtml(subject, body));
+          if (email) {
+            activeStage = "Sending email";
+            try {
+              await sendDigestEmail(email, subject, body);
+            } catch (err) {
+              throw new EmailDeliveryError(
+                `paperino could not send the email; the digest is ready at ${htmlPath}. ${LOGS_HINT}`,
+                { cause: err },
+              );
+            }
           }
-        }
-        const announcementFailed = coarseProgress.failed > 0 || fineProgress.failed > 0;
-        if (announcementFailed) {
-          hadFailures = true;
-          const failedCalls = coarseProgress.failed + fineProgress.failed;
+          const totalDurationMs = performance.now() - announcementStartedAt;
+          const announcementFailed = coarseProgress.failed > 0 || fineProgress.failed > 0;
+          if (announcementFailed) {
+            hadFailures = true;
+            const failedCalls = coarseProgress.failed + fineProgress.failed;
+            if (!options.quiet) {
+              process.stderr.write(
+                `${pc.yellow("⚠ Done with errors")} ${pc.dim(`in ${formatRuntime(totalDurationMs)}. Digest may be incomplete: ${failedCalls} call(s) failed. Run`)} paperino --logs ${pc.dim("for details.")}\n` +
+                  `${pc.dim("Digest ready at")} ${htmlPath}\n`,
+              );
+            }
+          } else if (!options.quiet) {
+            process.stderr.write(`${pc.green("Done")} ${pc.dim(`in ${formatRuntime(totalDurationMs)}. Digest ready at`)} ${htmlPath}\n`);
+          }
+          if (email && !options.quiet) {
+            process.stderr.write(`${pc.green("Email successfully sent.")} ${pc.dim("Delivered to")} ${email.recipientAddress}\n`);
+          }
           if (!options.quiet) {
-            process.stderr.write(
-              `${pc.yellow("⚠ Done with errors.")} ${pc.dim(`Digest may be incomplete: ${failedCalls} call(s) failed. Run`)} paperino --logs ${pc.dim("for details.")}\n` +
-                `${pc.dim("Digest ready at")} ${htmlPath}\n`,
-            );
+            process.stderr.write("\n");
           }
-        } else if (!options.quiet) {
-          process.stderr.write(`${pc.green("Done.")} ${pc.dim("Digest ready at")} ${htmlPath}\n`);
-        }
-        if (email && !options.quiet) {
-          process.stderr.write(`${pc.green("Email successfully sent.")} ${pc.dim("Delivered to")} ${email.recipientAddress}\n`);
-        }
-        if (!options.quiet) {
-          process.stderr.write("\n");
-        }
-        outputPaths.push(htmlPath);
+          outputPaths.push(htmlPath);
 
-        if (!options.quiet) {
-          openInBrowser(htmlPath);
-        }
+          if (!options.quiet) {
+            openInBrowser(htmlPath);
+          }
         } catch (error) {
           logger.stageFailed(activeStage, errorDetail(error));
           view.stop();
-          // Fetch errors are already concise and actionable; all other details stay in the log.
-          if (error instanceof Error && error.message.startsWith("arXiv request ")) {
-            throw error;
+          // Every failure reads the same except email, which reports where the digest landed.
+          throw error instanceof EmailDeliveryError
+            ? error
+            : new Error(`paperino could not finish. ${LOGS_HINT}`);
+        }
+        }
+
+        logger.pipelineEnd();
+
+        if (options.quiet) {
+          for (const path of outputPaths) {
+            process.stdout.write(`${path}\n`);
           }
-          throw new Error("paperino failed — please try again later. Run paperino --logs for details.");
         }
-      }
 
-      logger.pipelineEnd();
-
-      if (options.quiet) {
-        for (const path of outputPaths) {
-          process.stdout.write(`${path}\n`);
-        }
-      }
-
-      if (hadFailures) {
+        if (hadFailures) {
         process.exitCode = 1;
       }
     },
