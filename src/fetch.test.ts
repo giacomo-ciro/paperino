@@ -203,12 +203,13 @@ describe("fetchRecentPapers", () => {
     );
   });
 
-  it("reports the minimal timeout error after retrying", async () => {
+  it("surfaces the underlying timeout error after retrying", async () => {
     vi.useFakeTimers();
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")));
+    const timeout = new DOMException("timed out", "TimeoutError");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(timeout));
 
     const papers = fetchRecentPapers(["cs.CV"], new Date(0), new Date(1));
-    const expectation = expect(papers).rejects.toThrow("arXiv request timed out — please try again later");
+    const expectation = expect(papers).rejects.toBe(timeout);
     await vi.advanceTimersByTimeAsync(6000);
 
     await expectation;
@@ -223,7 +224,7 @@ describe("fetchRecentPapers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchRecentPapers(["cs.CV"], new Date(0), new Date(1))).rejects.toThrow(
-      "arXiv request failed — please try again later",
+      "HTTP 400 Bad Request",
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
