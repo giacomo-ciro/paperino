@@ -110,7 +110,7 @@ async function fetchPage(url: URL, pageStart: number, diagnostic?: FetchDiagnost
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    diagnostic?.(`arXiv page start=${pageStart}: request attempt ${attempt}/${MAX_ATTEMPTS}`);
+    diagnostic?.(`page start=${pageStart} requested (attempt ${attempt}/${MAX_ATTEMPTS})`);
 
     let response: Response | undefined;
     let xml: string | undefined;
@@ -126,25 +126,25 @@ async function fetchPage(url: URL, pageStart: number, diagnostic?: FetchDiagnost
     }
 
     if (xml !== undefined) {
-      diagnostic?.(`arXiv page start=${pageStart}: received ${xml.length} bytes`);
+      diagnostic?.(`page start=${pageStart} returned ${xml.length} bytes`);
       return xml;
     }
 
     if (response) {
       lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
       if (!isRetryableStatus(response.status)) {
-        diagnostic?.(`arXiv page start=${pageStart}: request failed: ${errorDetail(lastError)}`);
+        diagnostic?.(`page start=${pageStart} failed: ${errorDetail(lastError)}`);
         throw lastError;
       }
     }
 
     const detail = errorDetail(lastError);
     if (attempt === MAX_ATTEMPTS) {
-      diagnostic?.(`arXiv page start=${pageStart}: request failed after ${MAX_ATTEMPTS} attempts: ${detail}`);
+      diagnostic?.(`page start=${pageStart} failed after ${MAX_ATTEMPTS} attempts: ${detail}`);
       throw lastError;
     }
 
-    diagnostic?.(`arXiv page start=${pageStart}: request failed (${detail}); retrying in ${INTER_PAGE_DELAY_MS / 1000}s`);
+    diagnostic?.(`page start=${pageStart} failed, retrying in ${INTER_PAGE_DELAY_MS / 1000}s: ${detail}`);
     await sleep(INTER_PAGE_DELAY_MS);
   }
 
@@ -187,7 +187,7 @@ export async function fetchRecentPapers(
 
     totalResults = Number(parsed.feed.totalResults);
     const entries = parsed.feed.entry ?? [];
-    diagnostic?.(`arXiv page start=${start_}: ${entries.length} papers returned (${totalResults} total)`);
+    diagnostic?.(`page start=${start_} returned ${entries.length} papers (${totalResults} total)`);
     if (entries.length === 0) {
       break;
     }

@@ -1,6 +1,7 @@
+import { ClaudeCallError } from "./agent/claude.js";
 import { runPool } from "./agent/pool.js";
 import { COARSE_SCHEMA, fillPrompt, FINE_SCHEMA } from "./schemas.js";
-import type { Agent, Config, FineEntry, Paper } from "./types.js";
+import type { Agent, AgentOutput, Config, FineEntry, Paper } from "./types.js";
 
 export interface ScoringProgress {
   papersDone: number;
@@ -18,6 +19,23 @@ function groupForCalls<T>(items: T[], size: number): T[][] {
     groups.push(items.slice(i, i + size));
   }
   return groups;
+}
+
+/** "failed after 2 attempts" for a call that errored, plain "failed" for a bad output shape. */
+function failureOutcome(output: AgentOutput | Error, retries: number): string {
+  if (!(output instanceof Error)) return "failed";
+  const attempts = retries + 1;
+  return `failed after ${attempts} attempt${attempts === 1 ? "" : "s"}`;
+}
+
+function failureCause(output: AgentOutput | Error): string {
+  return output instanceof Error ? output.message : "malformed output shape";
+}
+
+/** Headline only: a retried attempt repeats, and the full diagnostics land on the final failure. */
+function briefCause(error: unknown): string {
+  if (error instanceof ClaudeCallError) return error.summary;
+  return error instanceof Error ? error.message : String(error);
 }
 
 function coarseFlag(verdicts: Map<string, unknown>, paperId: string): 0 | 1 {
@@ -57,8 +75,10 @@ export async function coarseFilter(
     maxWorkers: cfg.coarse.maxWorkers,
     timeoutMs: cfg.callTimeoutMs,
     retries: cfg.callRetries,
-    onAttemptFailed: (error, _index, attempt, totalAttempts) => {
-      onCallFailed?.(`attempt ${attempt}/${totalAttempts} failed, retrying — ${error}`);
+    onAttemptFailed: (error, index, attempt, totalAttempts) => {
+      onCallFailed?.(
+        `call ${index + 1}/${calls.length} attempt ${attempt}/${totalAttempts} failed, retrying: ${briefCause(error)}`,
+      );
     },
     onProgress: (output, index, callsDone, callsTotal) => {
       const c = calls[index];
@@ -70,7 +90,9 @@ export async function coarseFilter(
 
       if (callFailed) {
         failed++;
-        onCallFailed?.(output instanceof Error ? output.message : "malformed output shape");
+        onCallFailed?.(
+          `call ${index + 1}/${calls.length} ${failureOutcome(output, cfg.callRetries)}, ${c.length} paper${c.length === 1 ? "" : "s"} kept: ${failureCause(output)}`,
+        );
       }
 
       const verdicts = new Map<string, unknown>();
@@ -123,8 +145,10 @@ export async function fineScoring(
     maxWorkers: cfg.fine.maxWorkers,
     timeoutMs: cfg.callTimeoutMs,
     retries: cfg.callRetries,
-    onAttemptFailed: (error, _index, attempt, totalAttempts) => {
-      onCallFailed?.(`attempt ${attempt}/${totalAttempts} failed, retrying — ${error}`);
+    onAttemptFailed: (error, index, attempt, totalAttempts) => {
+      onCallFailed?.(
+        `call ${index + 1}/${calls.length} attempt ${attempt}/${totalAttempts} failed, retrying: ${briefCause(error)}`,
+      );
     },
     onProgress: (output, index, callsDone, callsTotal) => {
       const c = calls[index];
@@ -156,7 +180,9 @@ export async function fineScoring(
       } else {
         // call failed or malformed shape — leave unscored
         failed++;
-        onCallFailed?.(output instanceof Error ? output.message : "malformed output shape");
+        onCallFailed?.(
+          `call ${index + 1}/${calls.length} ${failureOutcome(output, cfg.callRetries)}, ${c.length} paper${c.length === 1 ? "" : "s"} unscored: ${failureCause(output)}`,
+        );
       }
 
       papersDone += c.length;

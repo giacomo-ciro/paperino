@@ -9,23 +9,19 @@ export interface RunPoolOptions {
   /** Called after each prompt settles, with its index/result and the count completed so far. */
   onProgress?: (result: AgentOutput | Error, index: number, completed: number, total: number) => void;
   /** Called after each failed attempt that will still be retried (not the final one). */
-  onAttemptFailed?: (error: string, index: number, attempt: number, totalAttempts: number) => void;
+  onAttemptFailed?: (error: unknown, index: number, attempt: number, totalAttempts: number) => void;
 }
 
 async function runOnce(agent: Agent, prompt: string, opts: RunPoolOptions): Promise<AgentOutput> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
-  try {
-    const { output } = await agent.run(prompt, {
-      model: opts.model,
-      schema: opts.schema,
-      timeoutMs: opts.timeoutMs,
-      signal: controller.signal,
-    });
-    return output;
-  } finally {
-    clearTimeout(timer);
-  }
+  // AbortSignal.timeout tags the signal reason as a TimeoutError, which lets the agent
+  // report "timed out" instead of a bare "aborted"; its timer does not hold the event loop.
+  const { output } = await agent.run(prompt, {
+    model: opts.model,
+    schema: opts.schema,
+    timeoutMs: opts.timeoutMs,
+    signal: AbortSignal.timeout(opts.timeoutMs),
+  });
+  return output;
 }
 
 async function runWithRetries(
@@ -42,7 +38,7 @@ async function runWithRetries(
     } catch (err) {
       lastError = err;
       if (attempt < totalAttempts) {
-        opts.onAttemptFailed?.(err instanceof Error ? err.message : String(err), index, attempt, totalAttempts);
+        opts.onAttemptFailed?.(err, index, attempt, totalAttempts);
       }
     }
   }

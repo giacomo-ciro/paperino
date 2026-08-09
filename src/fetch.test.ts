@@ -173,9 +173,9 @@ describe("fetchRecentPapers", () => {
     await fetchRecentPapers(["cs.CV"], new Date(0), new Date(1), undefined, (message) => diagnostics.push(message));
 
     expect(diagnostics).toEqual([
-      "arXiv page start=0: request attempt 1/3",
-      expect.stringMatching(/^arXiv page start=0: received \d+ bytes$/),
-      "arXiv page start=0: 3 papers returned (3 total)",
+      "page start=0 requested (attempt 1/3)",
+      expect.stringMatching(/^page start=0 returned \d+ bytes$/),
+      "page start=0 returned 3 papers (3 total)",
     ]);
   });
 
@@ -198,9 +198,7 @@ describe("fetchRecentPapers", () => {
 
     await expect(papers).resolves.toHaveLength(3);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(diagnostics).toContain(
-      "arXiv page start=0: request failed (TypeError: socket closed); retrying in 3s",
-    );
+    expect(diagnostics).toContain("page start=0 failed, retrying in 3s: TypeError: socket closed");
   });
 
   it("surfaces the underlying timeout error after retrying", async () => {

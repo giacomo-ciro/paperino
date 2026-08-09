@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ClaudeCallError } from "./agent/claude.js";
 import { coarseFilter, fineScoring, type ScoringProgress } from "./scoring.js";
 import type { Agent, AgentResult, Config, Paper } from "./types.js";
 
@@ -115,7 +116,25 @@ describe("coarseFilter", () => {
 
     expect(lastProgress?.failed).toBe(1);
     // callRetries: 1 -> one retry attempt fails (logged), then the final attempt's error is reported.
-    expect(failures).toEqual(["attempt 1/2 failed, retrying — boom", "boom"]);
+    expect(failures).toEqual([
+      "call 1/1 attempt 1/2 failed, retrying: boom",
+      "call 1/1 failed after 2 attempts, 2 papers kept: boom",
+    ]);
+  });
+
+  it("logs only the summary on a retried attempt, and the full diagnostics on the final failure", async () => {
+    const papers = [paper("a"), paper("b")];
+    const agent = mockAgent(async () => {
+      throw new ClaudeCallError("claude exited with code 1", { stderr: "Credit balance is too low" });
+    });
+
+    const failures: string[] = [];
+    await coarseFilter(papers, baseConfig, agent, undefined, (err) => failures.push(err));
+
+    expect(failures).toEqual([
+      "call 1/1 attempt 1/2 failed, retrying: claude exited with code 1",
+      "call 1/1 failed after 2 attempts, 2 papers kept: claude exited with code 1 | stderr: Credit balance is too low",
+    ]);
   });
 
   it("reports a malformed (non-object) verdict shape as a failed call", async () => {
@@ -136,7 +155,7 @@ describe("coarseFilter", () => {
     );
 
     expect(lastProgress?.failed).toBe(1);
-    expect(failures).toEqual(["malformed output shape"]);
+    expect(failures).toEqual(["call 1/1 failed, 1 paper kept: malformed output shape"]);
   });
 
   it("does not count a call that succeeds after a retry as failed", async () => {
@@ -162,7 +181,7 @@ describe("coarseFilter", () => {
     );
 
     expect(lastProgress?.failed).toBe(0);
-    expect(failures).toEqual(["attempt 1/2 failed, retrying — transient"]);
+    expect(failures).toEqual(["call 1/1 attempt 1/2 failed, retrying: transient"]);
   });
 });
 
@@ -250,7 +269,10 @@ describe("fineScoring", () => {
     );
 
     expect(lastProgress?.failed).toBe(1);
-    expect(failures).toEqual(["attempt 1/2 failed, retrying — boom", "boom"]);
+    expect(failures).toEqual([
+      "call 1/1 attempt 1/2 failed, retrying: boom",
+      "call 1/1 failed after 2 attempts, 1 paper unscored: boom",
+    ]);
   });
 
   it("reports a malformed output shape (missing papers array) as a failed call", async () => {
@@ -271,6 +293,6 @@ describe("fineScoring", () => {
     );
 
     expect(lastProgress?.failed).toBe(1);
-    expect(failures).toEqual(["malformed output shape"]);
+    expect(failures).toEqual(["call 1/1 failed, 1 paper unscored: malformed output shape"]);
   });
 });

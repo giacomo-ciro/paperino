@@ -55,14 +55,14 @@ function capMostRecent(papers: Paper[], maxPapers: number | undefined): Paper[] 
     .slice(0, maxPapers);
 }
 
+/** Metrics only: the log gets the stage name from stageStart/stageEnd, the TUI prepends it below. */
 function formatProgress(stage: "coarse" | "fine", p: ScoringProgress): string {
-  const stageName = stage === "coarse" ? "Coarse" : "Fine";
   const detail =
     stage === "coarse"
       ? `${p.passed}/${p.papersTotal} papers kept, `
       : "";
   return (
-    `${stageName} filtering: ${p.papersDone}/${p.papersTotal} papers processed ` +
+    `${p.papersDone}/${p.papersTotal} papers processed ` +
     `(${detail}${p.callsDone}/${p.callsTotal} calls done, ${p.failed} failed)`
   );
 }
@@ -226,15 +226,12 @@ program
       const agent = new ClaudeAgent(cfg.claudeBinary);
 
       const outputPaths: string[] = [];
-      let hadFailures = false;
+      let totalFailedCalls = 0;
 
       logger.pipelineStart(announcements.length);
 
       for (const announcement of announcements) {
         const { announcedAt, submittedFrom, submittedUntil } = announcement;
-        if (options.force) {
-          clearCache(cfg.cacheDir, announcedAt);
-        }
         const cacheFile = cachePath(cfg.cacheDir, announcedAt);
         const label = formatAnnouncementDate(announcedAt);
         const announcementStartedAt = performance.now();
@@ -249,13 +246,16 @@ program
         try {
           logger.stageStart(activeStage);
           const fetchStartedAt = performance.now();
+          if (options.force) {
+            clearCache(cfg.cacheDir, announcedAt);
+          }
           const existing = loadPapers(cacheFile);
           const fetched = await fetchRecentPapers(
             cfg.arxivCat,
             submittedFrom,
             submittedUntil,
             maxPapers,
-            (message) => logger.fetchDiagnostic(message),
+            (message) => logger.detail(message),
           );
           const papers = mergePapers(existing, fetched);
           savePapers(cacheFile, papers);
@@ -273,8 +273,9 @@ program
           if (options.onlyFetch) {
             view.stop();
             outputPaths.push(cacheFile);
+            const totalDurationMs = performance.now() - announcementStartedAt;
+            logger.announcementEnd(label, totalDurationMs);
             if (!options.quiet) {
-              const totalDurationMs = performance.now() - announcementStartedAt;
               process.stderr.write(`${pc.green("Done")} ${pc.dim(`in ${formatRuntime(totalDurationMs)}. Papers saved at`)} ${cacheFile}\n\n`);
             }
             continue;
@@ -290,14 +291,14 @@ program
             agent,
             (p) => {
               lastCoarse = p;
-              view.update(formatProgress("coarse", p));
+              view.update(`${activeStage}: ${formatProgress("coarse", p)}`);
             },
-            (err) => logger.callFailed("Coarse filtering", err),
+            (err) => logger.detail(err),
           );
           const coarseProgress = lastCoarse ?? alreadyDoneProgress(toProcess, "coarse");
           const coarseMetrics = formatProgress("coarse", coarseProgress);
           const coarseDurationMs = performance.now() - coarseStartedAt;
-          view.complete(withRuntime(coarseMetrics, coarseDurationMs), coarseProgress.failed > 0);
+          view.complete(withRuntime(`Coarse filtering: ${coarseMetrics}`, coarseDurationMs), coarseProgress.failed > 0);
           logger.stageEnd("Coarse filtering", coarseMetrics);
           savePapers(cacheFile, papers);
 
@@ -311,22 +312,31 @@ program
             agent,
             (p) => {
               lastFine = p;
-              view.update(formatProgress("fine", p));
+              view.update(`${activeStage}: ${formatProgress("fine", p)}`);
             },
-            (err) => logger.callFailed("Fine filtering", err),
+            (err) => logger.detail(err),
           );
           const fineProgress = lastFine ?? alreadyDoneProgress(toProcess, "fine");
           const fineMetrics = formatProgress("fine", fineProgress);
           const fineDurationMs = performance.now() - fineStartedAt;
-          view.complete(withRuntime(fineMetrics, fineDurationMs), fineProgress.failed > 0);
+          view.complete(withRuntime(`Fine filtering: ${fineMetrics}`, fineDurationMs), fineProgress.failed > 0);
           logger.stageEnd("Fine filtering", fineMetrics);
           savePapers(cacheFile, papers);
           view.stop();
 
-          const { subject, body } = buildDigest(papers, announcedAt, cfg.minScore);
+          // Not a tracked stage in the TUI, but it writes to disk and can fail on its own.
+          activeStage = "Building digest";
+          logger.stageStart(activeStage);
+          const { subject, body, coarsePassed, scoredAboveMin } = buildDigest(papers, announcedAt, cfg.minScore);
           const htmlPath = writeDigest(cfg.outDir, announcedAt, renderDigestHtml(subject, body));
+          logger.stageEnd(
+            activeStage,
+            `${scoredAboveMin}/${coarsePassed} papers scored ≥ ${cfg.minScore}, written to ${htmlPath}`,
+          );
+
           if (email) {
             activeStage = "Sending email";
+            logger.stageStart(activeStage);
             try {
               await sendDigestEmail(email, subject, body);
             } catch (err) {
@@ -335,15 +345,17 @@ program
                 { cause: err },
               );
             }
+            logger.stageEnd(activeStage, `delivered to ${email.recipientAddress}`);
           }
           const totalDurationMs = performance.now() - announcementStartedAt;
-          const announcementFailed = coarseProgress.failed > 0 || fineProgress.failed > 0;
-          if (announcementFailed) {
-            hadFailures = true;
-            const failedCalls = coarseProgress.failed + fineProgress.failed;
+          logger.announcementEnd(label, totalDurationMs);
+          const failedCalls = coarseProgress.failed + fineProgress.failed;
+          if (failedCalls > 0) {
+            totalFailedCalls += failedCalls;
             if (!options.quiet) {
+              const calls = `${failedCalls} call${failedCalls === 1 ? "" : "s"} failed`;
               process.stderr.write(
-                `${pc.yellow("⚠ Done with errors")} ${pc.dim(`in ${formatRuntime(totalDurationMs)}. Digest may be incomplete: ${failedCalls} call(s) failed. Run`)} paperino --logs ${pc.dim("for details.")}\n` +
+                `${pc.yellow("⚠ Done with errors")} ${pc.dim(`in ${formatRuntime(totalDurationMs)}. Digest may be incomplete: ${calls}. Run`)} paperino --logs ${pc.dim("for details.")}\n` +
                   `${pc.dim("Digest ready at")} ${htmlPath}\n`,
               );
             }
@@ -362,24 +374,26 @@ program
             openInBrowser(htmlPath);
           }
         } catch (error) {
-          logger.stageFailed(activeStage, errorDetail(error));
+          // EmailDeliveryError's message is stderr copy; the log wants the delivery failure itself.
+          logger.stageFailed(activeStage, errorDetail(error instanceof EmailDeliveryError ? error.cause : error));
+          logger.pipelineAborted();
           view.stop();
           // Every failure reads the same except email, which reports where the digest landed.
           throw error instanceof EmailDeliveryError
             ? error
             : new Error(`paperino could not finish. ${LOGS_HINT}`);
         }
+      }
+
+      logger.pipelineEnd(totalFailedCalls);
+
+      if (options.quiet) {
+        for (const path of outputPaths) {
+          process.stdout.write(`${path}\n`);
         }
+      }
 
-        logger.pipelineEnd();
-
-        if (options.quiet) {
-          for (const path of outputPaths) {
-            process.stdout.write(`${path}\n`);
-          }
-        }
-
-        if (hadFailures) {
+      if (totalFailedCalls > 0) {
         process.exitCode = 1;
       }
     },

@@ -31,7 +31,7 @@ export function buildDigest(
   papers: Paper[],
   announcedAt: Date,
   minScore: number,
-): { subject: string; body: string } {
+): { subject: string; body: string; coarsePassed: number; scoredAboveMin: number } {
   const kept = papers
     .filter((p) => p.coarse === 1)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
@@ -41,8 +41,10 @@ export function buildDigest(
   const subject = `Paperino (${formatAnnouncementDate(announcedAt)})`;
   const heading = `<h1 style="margin-bottom:4px">${escapeHtml(subject)}</h1>`;
 
+  const counts = { coarsePassed: kept.length, scoredAboveMin: top.length };
+
   if (kept.length === 0) {
-    return { subject, body: wrap(`${heading}\n<p style="margin-top:0">No relevant papers.</p>`) };
+    return { subject, body: wrap(`${heading}\n<p style="margin-top:0">No relevant papers.</p>`), ...counts };
   }
 
   const parts = [
@@ -57,7 +59,7 @@ export function buildDigest(
     parts.push(`<h3>Lower-scored papers</h3><ul>${items}</ul>`);
   }
 
-  return { subject, body: wrap(parts.join("\n")) };
+  return { subject, body: wrap(parts.join("\n")), ...counts };
 }
 
 const HEART_SVG =

@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
+import { formatRuntime } from "./runtime.js";
 
 function timestamp(): string {
   const now = new Date();
@@ -14,12 +15,17 @@ function timestamp(): string {
 export interface Logger {
   pipelineStart(announcementCount: number): void;
   announcementStart(label: string): void;
+  announcementEnd(label: string, durationMs: number): void;
   stageStart(label: string): void;
-  fetchDiagnostic(message: string): void;
-  stageFailed(stageLabel: string, error: string): void;
-  callFailed(stageLabel: string, error: string): void;
   stageEnd(label: string, metrics: string): void;
-  pipelineEnd(): void;
+  stageFailed(stageLabel: string, error: string): void;
+  /**
+   * One line from inside the active stage, indented under it; stageStart/stageEnd
+   * already name the stage, so the message carries only its own content.
+   */
+  detail(message: string): void;
+  pipelineEnd(failedCalls: number): void;
+  pipelineAborted(): void;
 }
 
 export function makeLogger(logPath: string): Logger {
@@ -32,28 +38,35 @@ export function makeLogger(logPath: string): Logger {
 
   return {
     pipelineStart(announcementCount: number): void {
-      write(`pipeline started (${announcementCount} announcement(s) to process)`);
+      write(`pipeline started (${announcementCount} announcement${announcementCount === 1 ? "" : "s"} to process)`);
     },
     announcementStart(label: string): void {
       write(`processing announcement ${label}`);
     },
+    announcementEnd(label: string, durationMs: number): void {
+      write(`announcement ${label} finished in ${formatRuntime(durationMs)}`);
+    },
     stageStart(label: string): void {
-      write(`  stage started: ${label}`);
-    },
-    fetchDiagnostic(message: string): void {
-      write(`  ${message}`);
-    },
-    stageFailed(stageLabel: string, error: string): void {
-      write(`  stage failed: ${stageLabel} — ${error}`);
-    },
-    callFailed(stageLabel: string, error: string): void {
-      write(`  call failed: ${stageLabel} — ${error}`);
+      write(`  ${label} started`);
     },
     stageEnd(label: string, metrics: string): void {
-      write(`  stage finished: ${label} — ${metrics}`);
+      write(`  ${label} finished: ${metrics}`);
     },
-    pipelineEnd(): void {
-      write("pipeline finished");
+    stageFailed(stageLabel: string, error: string): void {
+      write(`  ${stageLabel} failed: ${error}`);
+    },
+    detail(message: string): void {
+      write(`    ${message}`);
+    },
+    pipelineEnd(failedCalls: number): void {
+      write(
+        failedCalls === 0
+          ? "pipeline finished"
+          : `pipeline finished with ${failedCalls} failed call${failedCalls === 1 ? "" : "s"}`,
+      );
+    },
+    pipelineAborted(): void {
+      write("pipeline aborted");
     },
   };
 }
