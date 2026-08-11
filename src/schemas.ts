@@ -1,7 +1,7 @@
 import type { JsonSchema } from "./types.js";
 
 // additionalProperties maps (arbitrary key -> typed value) reliably trip up
-// claude's structured-output tool calling: it passes the value as a string
+// Claude's structured-output tool calling: it passes the value as a string
 // and gets stuck retrying against the schema. An array of typed objects
 // (same shape as FINE_SCHEMA below) doesn't have this problem.
 export const COARSE_SCHEMA: JsonSchema = {
@@ -24,7 +24,7 @@ export const COARSE_SCHEMA: JsonSchema = {
   additionalProperties: false,
 };
 
-// The claude CLI's --json-schema is used as a tool input_schema, which the API
+// The Claude CLI's --json-schema is used as a tool input_schema, which the API
 // requires to be type:"object" — the per-paper array must be nested under a key.
 export const FINE_SCHEMA: JsonSchema = {
   type: "object",

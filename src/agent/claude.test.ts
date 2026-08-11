@@ -86,7 +86,7 @@ describe("ClaudeAgent", () => {
     );
 
     const error = await agent
-      .run("prompt", { ...opts, timeoutMs: 400, signal: AbortSignal.timeout(400) })
+      .run("prompt", { ...opts, timeoutMs: 1000, signal: AbortSignal.timeout(1000) })
       .catch((e: unknown) => e);
 
     expect((error as ClaudeCallError).message).toContain("claude timed out after");

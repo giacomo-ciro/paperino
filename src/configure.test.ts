@@ -10,8 +10,8 @@ describe("patchConfigureAnswers", () => {
     const source = readFileSync(templatePath, "utf-8")
       .replace("ARXIV_CAT = []", "ARXIV_CAT = [] # categories chosen for this project")
       .replace("MIN_SCORE = 6", "MIN_SCORE = 9 # keep this threshold")
-      .replace("CALL_SIZE = 20 # papers per claude call", "CALL_SIZE = 20 # papers per claude call\nMAX_WORKERS = 2 # legacy")
-      .replace("CALL_SIZE = 5 # papers per claude call", "CALL_SIZE = 5 # papers per claude call\nMAX_WORKERS = 3 # legacy")
+      .replace("CALL_SIZE = 20 # papers per agent call", "CALL_SIZE = 20 # papers per agent call\nMAX_WORKERS = 2 # legacy")
+      .replace("CALL_SIZE = 5 # papers per agent call", "CALL_SIZE = 5 # papers per agent call\nMAX_WORKERS = 3 # legacy")
       .replace('CACHE_DIR = "~/.paperino/cache"', 'CACHE_DIR = "/tmp/paperino-cache"')
       .replace("CALL_RETRIES = 1", "CALL_RETRIES = 3")
       .replace(
@@ -20,6 +20,7 @@ describe("patchConfigureAnswers", () => {
       );
 
     const patched = patchConfigureAnswers(source, {
+      agent: "codex",
       researchInterests: "point-cloud reconstruction",
       arxivCat: ["cs.CV"],
       outDir: "/tmp/digests",
@@ -45,6 +46,7 @@ describe("patchConfigureAnswers", () => {
     });
     expect(output).toMatchObject({ OUT_DIR: "/tmp/digests", CACHE_DIR: "/tmp/paperino-cache" });
     expect(runtime.CALL_RETRIES).toBe(3);
+    expect(runtime.AGENT).toBe("codex");
     expect(stages.COARSE).toMatchObject({ CALL_SIZE: 30 });
     expect(stages.COARSE.PROMPT).toContain("Custom coarse prompt: {research_interests} {papers}");
     expect(stages.FINE).toMatchObject({ CALL_SIZE: 6 });

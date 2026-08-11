@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClaudeCallError } from "./agent/claude.js";
+import { AgentCallError } from "./agent/error.js";
 import { coarseFilter, fineScoring, type ScoringProgress } from "./scoring.js";
 import type { Agent, AgentResult, Config, Paper } from "./types.js";
 
@@ -19,7 +19,9 @@ function paper(id: string, overrides: Partial<Paper> = {}): Paper {
 }
 
 const baseConfig: Config = {
+  agent: "claude",
   claudeBinary: "claude",
+  codexBinary: "codex",
   arxivCat: ["cs.CV"],
   researchInterests: "test interests",
   minScore: 6,
@@ -125,7 +127,7 @@ describe("coarseFilter", () => {
   it("logs only the summary on a retried attempt, and the full diagnostics on the final failure", async () => {
     const papers = [paper("a"), paper("b")];
     const agent = mockAgent(async () => {
-      throw new ClaudeCallError("claude exited with code 1", { stderr: "Credit balance is too low" });
+      throw new AgentCallError("claude exited with code 1", { stderr: "Credit balance is too low" });
     });
 
     const failures: string[] = [];

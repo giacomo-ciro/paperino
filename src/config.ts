@@ -6,12 +6,13 @@ import { parse } from "smol-toml";
 import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
 import { checkWritableDir } from "./store.js";
 import { patchTomlValue, removeTomlValue, type TomlValue } from "./toml.js";
-import type { Config, EmailConfig, StageConfig } from "./types.js";
+import type { AgentProvider, Config, EmailConfig, StageConfig } from "./types.js";
 
 export const CONFIG_DIR = join(homedir(), ".paperino");
 export const CONFIG_PATH = join(CONFIG_DIR, "config.toml");
 
 const ALLOWED_MODELS = ["fable", "opus", "sonnet", "haiku"];
+const AGENT_PROVIDERS: AgentProvider[] = ["claude", "codex"];
 const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function expandTilde(path: string): string {
@@ -45,13 +46,21 @@ function addMissingDefaults(source: string, config: Record<string, unknown>, def
   return updated;
 }
 
-export function detectClaudeBinary(): string | null {
+function detectBinary(name: string): string | null {
   try {
-    const resolved = execFileSync("which", ["claude"], { encoding: "utf-8" }).trim();
+    const resolved = execFileSync("which", [name], { encoding: "utf-8" }).trim();
     return resolved || null;
   } catch {
     return null;
   }
+}
+
+export function detectClaudeBinary(): string | null {
+  return detectBinary("claude");
+}
+
+export function detectCodexBinary(): string | null {
+  return detectBinary("codex");
 }
 
 /** `mkdir -p` the config dir and fill any missing values from the bundled default. */
@@ -78,10 +87,11 @@ export function ensureConfig(configPath: string = CONFIG_PATH): void {
   }
 
   const claudeBinary = detectClaudeBinary();
+  const codexBinary = detectCodexBinary();
 
-  const rendered = claudeBinary
-    ? template.replace('CLAUDE_BINARY = "claude"', `CLAUDE_BINARY = "${claudeBinary}"`)
-    : template;
+  let rendered = template;
+  if (claudeBinary) rendered = rendered.replace('CLAUDE_BINARY = "claude"', `CLAUDE_BINARY = "${claudeBinary}"`);
+  if (codexBinary) rendered = rendered.replace('CODEX_BINARY = "codex"', `CODEX_BINARY = "${codexBinary}"`);
 
   if (!claudeBinary) {
     process.stderr.write(
@@ -214,11 +224,17 @@ class ConfigErrorCollector {
     return value as Record<string, unknown>;
   }
 
-  stage(stages: Record<string, unknown>, key: string, label: string, maxWorkers: number): StageConfig {
+  stage(
+    stages: Record<string, unknown>,
+    key: string,
+    label: string,
+    maxWorkers: number,
+    agent: AgentProvider,
+  ): StageConfig {
     const stage = this.table(stages, key, label);
 
     const model = this.nonEmptyString(stage, "MODEL", `${label}.MODEL`);
-    this.oneOf(model, ALLOWED_MODELS, `${label}.MODEL`);
+    if (agent === "claude") this.oneOf(model, ALLOWED_MODELS, `${label}.MODEL`);
 
     const callSize = this.number(stage, "CALL_SIZE", `${label}.CALL_SIZE`);
     this.numberSatisfies(callSize, `${label}.CALL_SIZE`, (n) => n > 0, "must be a positive number");
@@ -267,6 +283,10 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
   const maxWorkers = errors.number(runtime, "MAX_WORKERS", "RUNTIME.MAX_WORKERS");
   errors.numberSatisfies(maxWorkers, "RUNTIME.MAX_WORKERS", (n) => n > 0, "must be a positive number");
 
+  const agentValue = errors.nonEmptyString(runtime, "AGENT", "RUNTIME.AGENT");
+  errors.oneOf(agentValue, AGENT_PROVIDERS, "RUNTIME.AGENT");
+  const agent: AgentProvider = agentValue === "codex" ? "codex" : "claude";
+
   const arxivCat = errors.nonEmptyStringArray(research, "ARXIV_CAT", "RESEARCH.ARXIV_CAT");
   errors.arxivCategories(arxivCat, "RESEARCH.ARXIV_CAT");
 
@@ -308,7 +328,9 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
   }
 
   const config: Config = {
+    agent,
     claudeBinary: errors.nonEmptyString(runtime, "CLAUDE_BINARY", "RUNTIME.CLAUDE_BINARY"),
+    codexBinary: errors.nonEmptyString(runtime, "CODEX_BINARY", "RUNTIME.CODEX_BINARY"),
     callTimeoutMs: callTimeoutSeconds * 1000,
     callRetries,
     arxivCat,
@@ -318,8 +340,8 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
     outDir,
     logFile,
     email,
-    coarse: errors.stage(stages, "COARSE", "STAGES.COARSE", maxWorkers),
-    fine: errors.stage(stages, "FINE", "STAGES.FINE", maxWorkers),
+    coarse: errors.stage(stages, "COARSE", "STAGES.COARSE", maxWorkers, agent),
+    fine: errors.stage(stages, "FINE", "STAGES.FINE", maxWorkers, agent),
   };
 
   errors.throwIfAny(configPath);

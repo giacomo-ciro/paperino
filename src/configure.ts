@@ -5,10 +5,11 @@ import { createInterface } from "node:readline/promises";
 import pc from "picocolors";
 import { parse } from "smol-toml";
 import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
-import { CONFIG_PATH, detectClaudeBinary } from "./config.js";
+import { CONFIG_PATH, detectClaudeBinary, detectCodexBinary } from "./config.js";
 import { sendTestEmail } from "./email.js";
 import { checkWritableDir } from "./store.js";
 import { patchTomlValue, removeTomlValue } from "./toml.js";
+import type { AgentProvider } from "./types.js";
 
 const ALLOWED_MODELS = ["fable", "opus", "sonnet", "haiku"];
 const TOTAL_STEPS = 7;
@@ -87,6 +88,7 @@ function heading(step: number, text: string): void {
 }
 
 interface Answers {
+  agent: AgentProvider;
   researchInterests: string;
   arxivCat: string[];
   outDir: string;
@@ -122,6 +124,7 @@ function stringArrayValue(table: TomlTable, name: string, fallback: string[]): s
 
 export function patchConfigureAnswers(source: string, answers: Answers): string {
   const replacements: Array<[string, string, string | number | string[]]> = [
+    ["RUNTIME", "AGENT", answers.agent],
     ["RESEARCH", "ARXIV_CAT", answers.arxivCat],
     ["RESEARCH", "RESEARCH_INTERESTS", answers.researchInterests],
     ["OUTPUT", "OUT_DIR", answers.outDir],
@@ -167,6 +170,9 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
   const runtime = tableValue(config, "RUNTIME");
   const templateRuntime = tableValue(template, "RUNTIME");
   const initial = {
+    agent: stringValue(runtime, "AGENT", stringValue(templateRuntime, "AGENT", "claude")) === "codex"
+      ? "codex" as const
+      : "claude" as const,
     researchInterests: stringValue(research, "RESEARCH_INTERESTS", stringValue(templateResearch, "RESEARCH_INTERESTS", "")),
     arxivCat: stringArrayValue(research, "ARXIV_CAT", stringArrayValue(templateResearch, "ARXIV_CAT", [])),
     outDir: stringValue(output, "OUT_DIR", stringValue(templateOutput, "OUT_DIR", "~/paperino/digests")),
@@ -224,7 +230,7 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
 
   // ---- Step 1: research interests ----
   heading(1, "What are you working on?");
-  say(pc.dim("This is templated into the prompt Claude uses to judge relevance —"));
+  say(pc.dim("This is templated into the prompt your agent uses to judge relevance —"));
   say(pc.dim("be specific: methods, problem, domain. A couple of sentences is enough."));
   say("");
   const researchInterests = await ask("Describe your research", initial.researchInterests, (value) =>
@@ -255,12 +261,20 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
   say(pc.dim("Coarse pass screens every paper by title alone (cheap/fast model)."));
   say(pc.dim("Fine pass scores only what survives, reading title + abstract (stronger model)."));
   say("");
-  const coarseModel = await askChoice("Coarse model", ALLOWED_MODELS, initial.coarseModel);
-  const fineModel = await askChoice("Fine model", ALLOWED_MODELS, initial.fineModel);
+  const agent = await askChoice("Agent", ["claude", "codex"], initial.agent) as AgentProvider;
+  const keepingProvider = agent === initial.agent;
+  const coarseFallback = keepingProvider ? initial.coarseModel : agent === "codex" ? "gpt-5.6-luna" : "haiku";
+  const fineFallback = keepingProvider ? initial.fineModel : agent === "codex" ? "gpt-5.6-terra" : "sonnet";
+  const coarseModel = agent === "claude"
+    ? await askChoice("Coarse model", ALLOWED_MODELS, coarseFallback)
+    : await ask("Coarse model", coarseFallback, (value) => value === "" ? "required" : null);
+  const fineModel = agent === "claude"
+    ? await askChoice("Fine model", ALLOWED_MODELS, fineFallback)
+    : await ask("Fine model", fineFallback, (value) => value === "" ? "required" : null);
 
   // ---- Step 5: batch size ----
   heading(5, "Batch size");
-  say(pc.dim("How many papers go into a single Claude call — coarse reads titles only,"));
+  say(pc.dim("How many papers go into a single agent call — coarse reads titles only,"));
   say(pc.dim("fine reads title + abstract, so it uses smaller batches."));
   say("");
   const coarseCallSizeRaw = await ask(
@@ -341,6 +355,7 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
   summaryLine("Research interests", researchInterests);
   summaryLine("arXiv categories", arxivCat.join(", "));
   summaryLine("Digest directory", outDir);
+  summaryLine("Agent", agent);
   summaryLine("Coarse model", `${coarseModel} (${coarseCallSize} papers/call)`);
   summaryLine("Fine model", `${fineModel} (${fineCallSize} papers/call)`);
   summaryLine("Concurrency", `${maxWorkers} concurrent calls`);
@@ -364,6 +379,7 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
   }
 
   let rendered = patchConfigureAnswers(source, {
+    agent,
     researchInterests,
     arxivCat,
     outDir,
@@ -379,12 +395,17 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
 
   if (!exists) {
     const claudeBinary = detectClaudeBinary();
+    const codexBinary = detectCodexBinary();
     if (claudeBinary) {
       rendered = patchTomlValue(rendered, "RUNTIME", "CLAUDE_BINARY", claudeBinary);
-    } else {
-    process.stderr.write(
-      "warning: claude CLI not found — set RUNTIME.CLAUDE_BINARY in the config once it's installed.\n",
-    );
+    }
+    if (codexBinary) rendered = patchTomlValue(rendered, "RUNTIME", "CODEX_BINARY", codexBinary);
+    const selectedBinary = agent === "claude" ? claudeBinary : codexBinary;
+    if (!selectedBinary) {
+      const key = agent === "claude" ? "CLAUDE_BINARY" : "CODEX_BINARY";
+      process.stderr.write(
+        `warning: ${agent} CLI not found — set RUNTIME.${key} in the config once it's installed.\n`,
+      );
     }
   }
 

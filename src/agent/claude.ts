@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import type { Readable } from "node:stream";
 import { formatRuntime } from "../runtime.js";
 import type { Agent, AgentOutput, AgentResult, AgentRunOptions, JsonSchema } from "../types.js";
+import { AgentCallError } from "./error.js";
 
-const FIELD_CAP = 4000; // per diagnostic field, so one bad call can't dump megabytes into the log
+export { AgentCallError as ClaudeCallError } from "./error.js";
 const STDOUT_TAIL_LINES = 5;
 
 interface ClaudeResultEvent {
@@ -21,54 +22,6 @@ function isFinalStructuredResult(event: ClaudeResultEvent): boolean {
   return !event.is_error && event.subtype === "success" && !!event.structured_output;
 }
 
-/** Collapse to a single log-friendly line and cap the length. */
-function oneLine(value: string): string {
-  const collapsed = value.replace(/\s+/g, " ").trim();
-  return collapsed.length <= FIELD_CAP
-    ? collapsed
-    : `${collapsed.slice(0, FIELD_CAP)}… (+${collapsed.length - FIELD_CAP} more chars)`;
-}
-
-interface ClaudeDiagnostics {
-  exitCode?: number | null;
-  stderr?: string;
-  /** The terminal `result` event verbatim — carries claude's own error text. */
-  resultEvent?: unknown;
-  /** Trailing stdout lines that were not parseable as JSON events. */
-  stdoutTail?: string[];
-}
-
-/**
- * A failed claude call. Everything we captured is inlined into `message` so a single
- * log line is enough to diagnose an unattended run; the fields stay available too.
- *
- * ` | ` is the log's field-boundary marker and is reserved for that: claude's stderr and
- * JSON payloads contain colons, commas and semicolons freely, so nothing else survives
- * them unambiguously. Every other message in the log uses `<subject> <verb>: <detail>`.
- */
-export class ClaudeCallError extends Error {
-  /** The headline alone, without the diagnostic fields — logged on retries, which repeat. */
-  readonly summary: string;
-  readonly exitCode: number | null;
-  readonly stderr: string;
-  readonly resultEvent: unknown;
-  readonly stdoutTail: string[];
-
-  constructor(summary: string, diagnostics: ClaudeDiagnostics = {}) {
-    const { exitCode = null, stderr = "", resultEvent, stdoutTail = [] } = diagnostics;
-    const parts = [summary];
-    if (resultEvent !== undefined) parts.push(`result event: ${oneLine(JSON.stringify(resultEvent))}`);
-    if (stderr.trim()) parts.push(`stderr: ${oneLine(stderr)}`);
-    if (stdoutTail.length > 0) parts.push(`unparsed stdout: ${oneLine(stdoutTail.join(" "))}`);
-    super(parts.join(" | "));
-    this.name = "ClaudeCallError";
-    this.summary = summary;
-    this.exitCode = exitCode;
-    this.stderr = stderr;
-    this.resultEvent = resultEvent;
-    this.stdoutTail = stdoutTail;
-  }
-}
 
 function buildClaudeArgs(prompt: string, model: string, schema: JsonSchema): string[] {
   return [
@@ -163,7 +116,7 @@ export class ClaudeAgent implements Agent {
         // the pool aborts via AbortSignal.timeout, so a TimeoutError reason means we ran long
         const timedOut = (opts.signal?.reason as { name?: string } | undefined)?.name === "TimeoutError";
         reject(
-          new ClaudeCallError(
+          new AgentCallError(
             timedOut ? `claude timed out after ${formatRuntime(opts.timeoutMs)}` : "claude call aborted",
             { stderr, stdoutTail },
           ),
@@ -178,19 +131,19 @@ export class ClaudeAgent implements Agent {
       child.on("error", (err) => {
         if (settled) return;
         settled = true;
-        reject(new ClaudeCallError(`failed to spawn claude: ${err.message}`, { stderr, stdoutTail }));
+        reject(new AgentCallError(`failed to spawn claude: ${err.message}`, { stderr, stdoutTail }));
       });
 
       child.stdout!.on("error", (err) => {
         if (settled) return;
         settled = true;
-        reject(new ClaudeCallError(`stdout stream error: ${err.message}`, { stderr, stdoutTail }));
+        reject(new AgentCallError(`stdout stream error: ${err.message}`, { stderr, stdoutTail }));
       });
 
       child.stderr!.on("error", (err) => {
         if (settled) return;
         settled = true;
-        reject(new ClaudeCallError(`stderr stream error: ${err.message}`, { stderr, stdoutTail }));
+        reject(new AgentCallError(`stderr stream error: ${err.message}`, { stderr, stdoutTail }));
       });
 
       let resultEvent: ClaudeResultEvent | null = null;
@@ -227,19 +180,19 @@ export class ClaudeAgent implements Agent {
         };
 
         if (code !== 0) {
-          reject(new ClaudeCallError(`claude exited with code ${code}`, diagnostics));
+          reject(new AgentCallError(`claude exited with code ${code}`, diagnostics));
           return;
         }
         if (!terminalResultEvent) {
-          reject(new ClaudeCallError("claude returned no result event", diagnostics));
+          reject(new AgentCallError("claude returned no result event", diagnostics));
           return;
         }
         if (terminalResultEvent.is_error || terminalResultEvent.subtype !== "success") {
-          reject(new ClaudeCallError("claude reported an error", diagnostics));
+          reject(new AgentCallError("claude reported an error", diagnostics));
           return;
         }
         if (!terminalResultEvent.structured_output) {
-          reject(new ClaudeCallError("claude returned no structured_output", diagnostics));
+          reject(new AgentCallError("claude returned no structured_output", diagnostics));
           return;
         }
 
