@@ -5,7 +5,7 @@
   <a href="https://www.npmjs.com/package/@giacomo-ciro/paperino"><img src="https://img.shields.io/badge/npm-%40giacomo--ciro%2Fpaperino-cb3837" alt="npm package"></a>
 </p>
 
-> Every new arXiv paper, every day, filtered by Claude Code down to what's actually worth your time.
+> Every new arXiv paper, every day, filtered by your agent down to what's actually worth your time.
 
 
 <p align="center">
@@ -18,7 +18,7 @@ Of those, <40 look relevant from the title, and <5 are actually worth reading af
 
 Existing tools based on similarity search or embeddings (Scholar Inbox, arXiv Sanity, etc.) aren't precise enough.
 
-Claude Code delivers hyper-precise filtering tailored to your exact research project, running fresh every day.
+Your chosen agent delivers precise filtering tailored to your exact research project, running fresh every day. Paperino supports both Claude Code and Codex.
 
 Scanning the results then takes just 5-10 minutes, and you stay up to date with the latest research.
 
@@ -38,6 +38,8 @@ Set it up:
 ```
 paperino --configure    # walks you through setup with a few questions
 ```
+
+**Requirements:** [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex/cli), installed and signed in.
 
 ## Usage
 
@@ -86,13 +88,15 @@ PATH=/home/you/.nvm/versions/node/v24.15.0/bin:/home/you/.npm-global/bin:/usr/bi
 Paperino is minimal, built to work efficiently. It follows a 3-step process:
 
 1. **Fetching papers:** fetch the papers from the selected arXiv announcement (by default, the latest one). This step only filters by arXiv category (cs.LM, cs.CV, etc.).
-2. **Coarse filtering:** Claude receives your research context and a batch of titles per call (default 20), and outputs a binary relevant/not-relevant judgment. This step is kept coarse: Claude defaults to marking papers as potentially relevant when unsure.
-3. **Fine filtering:** Claude receives a smaller batch of title+abstract pairs per call and scores each paper on a scale of 1-10. Papers scoring above 6 get a full summary in the HTML digest; the rest get a one-line mention.
+2. **Coarse filtering:** Your configured agent receives your research context and a batch of titles per call (default 20), and outputs a binary relevant/not-relevant judgment. This step is kept coarse: papers are marked as potentially relevant when the agent is unsure.
+3. **Fine filtering:** The agent receives a smaller batch of title+abstract pairs per call and scores each paper on a scale of 1-10. Papers scoring above 6 get a full summary in the HTML digest; the rest get a one-line mention.
 
 All aforementioned parameters are configurable (what model to use, papers per call, max papers, threshold score etc.):
 ```
 paperino --configure
 ```
+
+The setup wizard lets you choose Claude Code or Codex and configure a model for each pass. Existing configurations continue to use Claude Code unless you select Codex.
 
 ## Acknowledgments
 This tool was initially inspired by [AlessandroMorosini/arxiv-digest](https://github.com/AlessandroMorosini/arxiv-digest). Code-wise, I took inspiration from [kunchenguid/gnhf](https://github.com/kunchenguid/gnhf).

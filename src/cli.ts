@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { spawn } from "node:child_process";
 import { Command, InvalidArgumentError } from "commander";
 import pc from "picocolors";
-import { ClaudeAgent } from "./agent/claude.js";
+import { createAgent } from "./agent/index.js";
 import { ensureConfig, loadConfig } from "./config.js";
 import { buildDigest } from "./digest.js";
 import { sendDigestEmail } from "./email.js";
@@ -121,7 +121,7 @@ ${body}
 program
   .name("paperino")
   .description(
-    "Every new arXiv paper, every day, filtered by Claude Code down to what's actually worth your time.",
+    "Every new arXiv paper, every day, filtered by your chosen agent down to what's actually worth your time.",
   )
   .version(packageVersion)
   .option(
@@ -223,7 +223,7 @@ program
         return;
       }
 
-      const agent = new ClaudeAgent(cfg.claudeBinary);
+      const agent = createAgent(cfg);
 
       const outputPaths: string[] = [];
       let totalFailedCalls = 0;

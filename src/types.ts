@@ -33,15 +33,19 @@ export interface EmailConfig {
   appPassword: string;
 }
 
+export type AgentProvider = "claude" | "codex";
+
 export interface Config {
+  agent: AgentProvider;
   claudeBinary: string;
+  codexBinary: string;
   arxivCat: string[];
   researchInterests: string;
   minScore: number;
   cacheDir: string; // ~-expanded absolute; holds YYYY-MM-DD.json, safe to delete
   outDir: string; // ~-expanded absolute; holds YYYY-MM-DD.html digests
   logFile: string; // ~-expanded absolute; always appended to
-  callTimeoutMs: number; // per claude call timeout (config: RUNTIME.CALL_TIMEOUT_SECONDS → ms)
+  callTimeoutMs: number; // per-agent-call timeout (config: RUNTIME.CALL_TIMEOUT_SECONDS → ms)
   callRetries: number; // retries after the first attempt (config: RUNTIME.CALL_RETRIES)
   coarse: StageConfig; // title-only screening pass; coarse.prompt drives it
   fine: StageConfig; // title+abstract scoring pass; fine.prompt drives it

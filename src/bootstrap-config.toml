@@ -15,7 +15,7 @@
 # "stat.ML",   # statistical ml
 # must be in quote: e.g., ARXIV_CAT=["cs.CV"]
 ARXIV_CAT = []
-# Describe your research so claude can judge relevance. Required.
+# Describe your research so the configured agent can judge relevance. Required.
 # Templated into both scoring prompts as {research_interests} — the more
 # specific, the better the filtering.
 # Example: "Incremental 3D object reconstruction from streamed point clouds
@@ -51,10 +51,10 @@ APP_PASSWORD = ""
 # marking it 0 or 1 to decide whether it's worth the pricier fine pass below.
 # On error or malformed output, papers fail open (kept, not dropped).
 [STAGES.COARSE]
-MODEL = "haiku" # one of: fable, opus, sonnet, haiku
-CALL_SIZE = 20 # papers per claude call
+MODEL = "haiku" # must match RUNTIME.AGENT — claude: fable, opus, sonnet, haiku; codex: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol
+CALL_SIZE = 20 # papers per agent call
 # Only describe the task here — the output shape (JSON keys/types) is
-# enforced separately via claude's structured-output schema (src/schemas.ts).
+# enforced separately via the agent's structured-output schema (src/schemas.ts).
 # Don't add a JSON example; anything below is task instructions only.
 PROMPT = """
 You are screening newly announced arXiv papers for relevance to a research project.
@@ -75,8 +75,8 @@ Papers:
 # reading title and abstract, on the 1-10 scale below. A failed call leaves
 # its papers unscored rather than guessing.
 [STAGES.FINE]
-MODEL = "sonnet" # one of: fable, opus, sonnet, haiku
-CALL_SIZE = 5 # papers per claude call
+MODEL = "sonnet" # must match RUNTIME.AGENT — claude: fable, opus, sonnet, haiku; codex: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol
+CALL_SIZE = 5 # papers per agent call
 PROMPT = """
 You are scoring newly announced arXiv papers for relevance to a research project.
 
@@ -94,15 +94,18 @@ Papers:
 {papers}
 """
 
-# How paperino calls claude.
+# How paperino calls the scoring agent.
 [RUNTIME]
+AGENT = "claude" # one of: claude, codex
 # Absolute path to the claude CLI binary, used for every scoring call.
 # Auto-filled from `which claude` on first run. If that failed, run
 # `which claude` yourself and paste the result here.
 CLAUDE_BINARY = "claude"
+# Absolute path to the Codex CLI binary. Auto-filled from `which codex` on first run.
+CODEX_BINARY = "codex"
 # Per-call timeout, in seconds.
 CALL_TIMEOUT_SECONDS = 300
 # Retries after a call fails, before giving up on it.
 CALL_RETRIES = 1
-# Maximum concurrent Claude calls in either scoring stage.
+# Maximum concurrent agent calls in either scoring stage.
 MAX_WORKERS = 10

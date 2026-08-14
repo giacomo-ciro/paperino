@@ -1,4 +1,4 @@
-import { ClaudeCallError } from "./agent/claude.js";
+import { AgentCallError } from "./agent/error.js";
 import { runPool } from "./agent/pool.js";
 import { COARSE_SCHEMA, fillPrompt, FINE_SCHEMA } from "./schemas.js";
 import type { Agent, AgentOutput, Config, FineEntry, Paper } from "./types.js";
@@ -12,7 +12,7 @@ export interface ScoringProgress {
   failed: number; // calls that errored (after retries) or returned a malformed shape
 }
 
-/** Group items into chunks of `size`, one chunk per claude call. */
+/** Group items into chunks of `size`, one chunk per agent call. */
 function groupForCalls<T>(items: T[], size: number): T[][] {
   const groups: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -34,7 +34,7 @@ function failureCause(output: AgentOutput | Error): string {
 
 /** Headline only: a retried attempt repeats, and the full diagnostics land on the final failure. */
 function briefCause(error: unknown): string {
-  if (error instanceof ClaudeCallError) return error.summary;
+  if (error instanceof AgentCallError) return error.summary;
   return error instanceof Error ? error.message : String(error);
 }
 
