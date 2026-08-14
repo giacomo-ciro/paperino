@@ -3,6 +3,8 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@giacomo-ciro/paperino"><img src="https://img.shields.io/npm/v/@giacomo-ciro/paperino.svg?label=release&color=blue" alt="release version"></a>
   <a href="https://www.npmjs.com/package/@giacomo-ciro/paperino"><img src="https://img.shields.io/badge/npm-%40giacomo--ciro%2Fpaperino-cb3837" alt="npm package"></a>
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/agent-Claude_Code-D97757" alt="Claude Code"></a>
+  <a href="https://openai.com/codex"><img src="https://img.shields.io/badge/agent-Codex-412991" alt="Codex"></a>
 </p>
 
 > Every new arXiv paper, every day, filtered by your agent down to what's actually worth your time.
