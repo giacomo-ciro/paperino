@@ -18,11 +18,15 @@ afterEach(() => {
   vi.unmock("node:child_process");
 });
 
+// loadConfig checks that the selected agent's binary still exists, so the fixture needs a
+// real executable. process.execPath is present wherever these tests run.
+const BINARY = process.execPath;
+
 const VALID_TOML = `
 [RUNTIME]
 AGENT = "claude"
-CLAUDE_BINARY = "/usr/local/bin/claude"
-CODEX_BINARY = "/usr/local/bin/codex"
+CLAUDE_BINARY = "${BINARY}"
+CODEX_BINARY = "${BINARY}"
 CALL_TIMEOUT_SECONDS = 300
 CALL_RETRIES = 1
 MAX_WORKERS = 10
@@ -54,8 +58,8 @@ describe("loadConfig", () => {
     const config = loadConfig(configPath);
 
     expect(config.agent).toBe("claude");
-    expect(config.claudeBinary).toBe("/usr/local/bin/claude");
-    expect(config.codexBinary).toBe("/usr/local/bin/codex");
+    expect(config.claudeBinary).toBe(BINARY);
+    expect(config.codexBinary).toBe(BINARY);
     expect(config.arxivCat).toEqual(["cs.CV"]);
     expect(config.researchInterests).toBe("point clouds");
     expect(config.minScore).toBe(6);
@@ -102,7 +106,7 @@ describe("loadConfig", () => {
     expect(config.coarse.prompt).toContain("{research_interests}");
     expect(config.fine.prompt).toContain("{papers}");
     expect(config.callRetries).toBe(1);
-    expect(config.claudeBinary).toBe("/usr/local/bin/claude");
+    expect(config.claudeBinary).toBe(BINARY);
   });
 
   it("loads a missing table restored by ensureConfig", () => {
@@ -301,7 +305,7 @@ APP_PASSWORD = "abcdefghijklmnop"
     expect(() => loadConfig(configPath)).toThrow(/STAGES\.COARSE\.MODEL.*must be one of/);
   });
 
-  it("accepts arbitrary non-empty Codex model IDs", () => {
+  it("accepts Codex models when the agent is codex", () => {
     const codex = VALID_TOML
       .replace('AGENT = "claude"', 'AGENT = "codex"')
       .replace('MODEL = "haiku"', 'MODEL = "gpt-5.6-luna"')
@@ -313,6 +317,39 @@ APP_PASSWORD = "abcdefghijklmnop"
     expect(config.agent).toBe("codex");
     expect(config.coarse.model).toBe("gpt-5.6-luna");
     expect(config.fine.model).toBe("gpt-5.6-terra");
+  });
+
+  it("rejects a model that isn't one of the configured agent's own", () => {
+    const codex = VALID_TOML
+      .replace('AGENT = "claude"', 'AGENT = "codex"')
+      .replace('MODEL = "haiku"', 'MODEL = "gpt-4o"');
+    writeFileSync(configPath, codex, "utf-8");
+
+    expect(() => loadConfig(configPath)).toThrow(/STAGES\.COARSE\.MODEL.*must be one of: gpt-5\.6-luna/);
+  });
+
+  it("rejects a Claude model while the agent is codex", () => {
+    writeFileSync(configPath, VALID_TOML.replace('AGENT = "claude"', 'AGENT = "codex"'), "utf-8");
+
+    expect(() => loadConfig(configPath)).toThrow(/STAGES\.COARSE\.MODEL.*got "haiku"/);
+  });
+
+  it("fails loudly when the selected agent's binary no longer exists", () => {
+    writeFileSync(configPath, VALID_TOML.replace(`CLAUDE_BINARY = "${BINARY}"`, 'CLAUDE_BINARY = "/gone/claude"'), "utf-8");
+
+    expect(() => loadConfig(configPath)).toThrow(/RUNTIME\.CLAUDE_BINARY.*no longer exists/);
+  });
+
+  it("ignores a stale binary path for the agent that isn't selected", () => {
+    writeFileSync(configPath, VALID_TOML.replace(`CODEX_BINARY = "${BINARY}"`, 'CODEX_BINARY = "/gone/codex"'), "utf-8");
+
+    expect(loadConfig(configPath).codexBinary).toBe("/gone/codex");
+  });
+
+  it("leaves a bare command name to resolve against PATH", () => {
+    writeFileSync(configPath, VALID_TOML.replace(`CLAUDE_BINARY = "${BINARY}"`, 'CLAUDE_BINARY = "claude"'), "utf-8");
+
+    expect(loadConfig(configPath).claudeBinary).toBe("claude");
   });
 
   it("rejects an unknown agent provider", () => {
@@ -398,15 +435,30 @@ APP_PASSWORD = ""
   it("migrates an existing Claude-only config without changing its provider", () => {
     const legacy = VALID_TOML
       .replace('AGENT = "claude"\n', "")
-      .replace('CODEX_BINARY = "/usr/local/bin/codex"\n', "");
+      .replace(`CODEX_BINARY = "${BINARY}"\n`, "");
     writeFileSync(configPath, legacy, "utf-8");
 
     ensureConfig(configPath);
 
     const updated = readFileSync(configPath, "utf-8");
     expect(updated).toContain('AGENT = "claude"');
-    expect(updated).toContain('CODEX_BINARY = "codex"');
+    // Resolved via `which` when codex is installed, the bare placeholder when it isn't.
+    expect(updated).toMatch(/CODEX_BINARY = ".+"/);
     expect(loadConfig(configPath).agent).toBe("claude");
+  });
+
+  it("resolves a binary added by migration from `which`", async () => {
+    vi.doMock("node:child_process", async () => {
+      const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+      return { ...actual, execFileSync: vi.fn((_command: string, args: string[]) => `/opt/homebrew/bin/${args[0]}\n`) };
+    });
+    vi.resetModules();
+    const { ensureConfig: ensure } = await import("./config.js");
+    writeFileSync(configPath, VALID_TOML.replace(`CODEX_BINARY = "${BINARY}"\n`, ""), "utf-8");
+
+    ensure(configPath);
+
+    expect(readFileSync(configPath, "utf-8")).toContain('CODEX_BINARY = "/opt/homebrew/bin/codex"');
   });
 
   it("templates agent binaries from the matching `which` result", async () => {

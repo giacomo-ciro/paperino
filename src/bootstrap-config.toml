@@ -51,7 +51,7 @@ APP_PASSWORD = ""
 # marking it 0 or 1 to decide whether it's worth the pricier fine pass below.
 # On error or malformed output, papers fail open (kept, not dropped).
 [STAGES.COARSE]
-MODEL = "haiku" # Claude aliases: fable, opus, sonnet, haiku; Codex: any model ID
+MODEL = "haiku" # must match RUNTIME.AGENT — claude: fable, opus, sonnet, haiku; codex: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol
 CALL_SIZE = 20 # papers per agent call
 # Only describe the task here — the output shape (JSON keys/types) is
 # enforced separately via the agent's structured-output schema (src/schemas.ts).
@@ -75,7 +75,7 @@ Papers:
 # reading title and abstract, on the 1-10 scale below. A failed call leaves
 # its papers unscored rather than guessing.
 [STAGES.FINE]
-MODEL = "sonnet" # Claude aliases: fable, opus, sonnet, haiku; Codex: any model ID
+MODEL = "sonnet" # must match RUNTIME.AGENT — claude: fable, opus, sonnet, haiku; codex: gpt-5.6-luna, gpt-5.6-terra, gpt-5.6-sol
 CALL_SIZE = 5 # papers per agent call
 PROMPT = """
 You are scoring newly announced arXiv papers for relevance to a research project.

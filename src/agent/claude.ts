@@ -5,6 +5,7 @@ import type { Readable } from "node:stream";
 import { formatRuntime } from "../runtime.js";
 import type { Agent, AgentOutput, AgentResult, AgentRunOptions, JsonSchema } from "../types.js";
 import { AgentCallError } from "./error.js";
+import { terminateProcess } from "./spawn.js";
 
 export { AgentCallError as ClaudeCallError } from "./error.js";
 const STDOUT_TAIL_LINES = 5;
@@ -43,18 +44,6 @@ function buildClaudeArgs(prompt: string, model: string, schema: JsonSchema): str
     // claude can only output text, which is not dangerous.
     "--dangerously-skip-permissions",
   ];
-}
-
-function terminateClaudeProcess(child: ReturnType<typeof spawn>): void {
-  if (child.pid) {
-    try {
-      process.kill(-child.pid, "SIGTERM");
-      return;
-    } catch {
-      // Fall back to the direct child if it was not started as a process group.
-    }
-  }
-  child.kill("SIGTERM");
 }
 
 /** Split a newline-delimited JSON stream into parsed events, tolerating partial chunks. */
@@ -112,7 +101,7 @@ export class ClaudeAgent implements Agent {
       const onAbort = () => {
         if (settled) return;
         settled = true;
-        terminateClaudeProcess(child);
+        terminateProcess(child);
         // the pool aborts via AbortSignal.timeout, so a TimeoutError reason means we ran long
         const timedOut = (opts.signal?.reason as { name?: string } | undefined)?.name === "TimeoutError";
         reject(

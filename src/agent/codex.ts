@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { formatRuntime } from "../runtime.js";
 import type { Agent, AgentResult, AgentRunOptions } from "../types.js";
 import { AgentCallError } from "./error.js";
+import { terminateProcess } from "./spawn.js";
 
 const CAPTURE_CAP = 20_000;
 const STDOUT_TAIL_LINES = 5;
@@ -12,18 +13,6 @@ const STDOUT_TAIL_LINES = 5;
 function appendTail(current: string, chunk: Buffer): string {
   const next = current + chunk.toString();
   return next.length <= CAPTURE_CAP ? next : next.slice(-CAPTURE_CAP);
-}
-
-function terminateProcess(child: ReturnType<typeof spawn>): void {
-  if (child.pid) {
-    try {
-      process.kill(-child.pid, "SIGTERM");
-      return;
-    } catch {
-      // Fall back to the direct child if it was not started as a process group.
-    }
-  }
-  child.kill("SIGTERM");
 }
 
 export class CodexAgent implements Agent {
@@ -44,6 +33,14 @@ export class CodexAgent implements Agent {
       "exec",
       "--model",
       opts.model,
+      // paperino feeds untrusted arXiv titles and abstracts into the prompt, so the model
+      // gets no way to act on them beyond emitting the structured output — the same privilege
+      // the claude path gets from --allowedTools. Codex enables its shell tool by default, and
+      // $CODEX_HOME/config.toml is where MCP servers and hooks would come from (auth is
+      // unaffected). --sandbox read-only then stays as a second line of defence.
+      "--disable",
+      "shell_tool",
+      "--ignore-user-config",
       "--sandbox",
       "read-only",
       "--skip-git-repo-check",

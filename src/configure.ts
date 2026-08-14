@@ -5,13 +5,12 @@ import { createInterface } from "node:readline/promises";
 import pc from "picocolors";
 import { parse } from "smol-toml";
 import { ARXIV_CATEGORY_CODES } from "./arxiv-categories.js";
-import { CONFIG_PATH, detectClaudeBinary, detectCodexBinary } from "./config.js";
+import { AGENT_MODELS, CONFIG_PATH, detectClaudeBinary, detectCodexBinary } from "./config.js";
 import { sendTestEmail } from "./email.js";
 import { checkWritableDir } from "./store.js";
 import { patchTomlValue, removeTomlValue } from "./toml.js";
 import type { AgentProvider } from "./types.js";
 
-const ALLOWED_MODELS = ["fable", "opus", "sonnet", "haiku"];
 const TOTAL_STEPS = 7;
 const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SUMMARY_LABEL_WIDTH = 20;
@@ -256,21 +255,21 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
   say("");
   const outDir = await ask("Digest directory", initial.outDir, validateOutDir);
 
-  // ---- Step 4: models ----
-  heading(4, "Models");
+  // ---- Step 4: agent and models ----
+  heading(4, "Agent and models");
   say(pc.dim("Coarse pass screens every paper by title alone (cheap/fast model)."));
   say(pc.dim("Fine pass scores only what survives, reading title + abstract (stronger model)."));
   say("");
   const agent = await askChoice("Agent", ["claude", "codex"], initial.agent) as AgentProvider;
-  const keepingProvider = agent === initial.agent;
-  const coarseFallback = keepingProvider ? initial.coarseModel : agent === "codex" ? "gpt-5.6-luna" : "haiku";
-  const fineFallback = keepingProvider ? initial.fineModel : agent === "codex" ? "gpt-5.6-terra" : "sonnet";
-  const coarseModel = agent === "claude"
-    ? await askChoice("Coarse model", ALLOWED_MODELS, coarseFallback)
-    : await ask("Coarse model", coarseFallback, (value) => value === "" ? "required" : null);
-  const fineModel = agent === "claude"
-    ? await askChoice("Fine model", ALLOWED_MODELS, fineFallback)
-    : await ask("Fine model", fineFallback, (value) => value === "" ? "required" : null);
+  const models = AGENT_MODELS[agent];
+  const [defaultCoarse, defaultFine] =
+    agent === "codex" ? ["gpt-5.6-luna", "gpt-5.6-terra"] : ["haiku", "sonnet"];
+  // The stored model belongs to whichever provider was configured before, so it can only
+  // stay the default while it's still a valid choice for the one just picked.
+  const coarseFallback = models.includes(initial.coarseModel) ? initial.coarseModel : defaultCoarse;
+  const fineFallback = models.includes(initial.fineModel) ? initial.fineModel : defaultFine;
+  const coarseModel = await askChoice("Coarse model", models, coarseFallback);
+  const fineModel = await askChoice("Fine model", models, fineFallback);
 
   // ---- Step 5: batch size ----
   heading(5, "Batch size");
@@ -393,18 +392,19 @@ export async function runConfigure(configPath: string = CONFIG_PATH): Promise<vo
     appPassword,
   });
 
-  if (!exists) {
-    const claudeBinary = detectClaudeBinary();
-    const codexBinary = detectCodexBinary();
-    if (claudeBinary) {
-      rendered = patchTomlValue(rendered, "RUNTIME", "CLAUDE_BINARY", claudeBinary);
-    }
-    if (codexBinary) rendered = patchTomlValue(rendered, "RUNTIME", "CODEX_BINARY", codexBinary);
-    const selectedBinary = agent === "claude" ? claudeBinary : codexBinary;
-    if (!selectedBinary) {
-      const key = agent === "claude" ? "CLAUDE_BINARY" : "CODEX_BINARY";
+  // Resolve any binary still stored as a bare command name — cron runs with a minimal PATH,
+  // so only an absolute path is guaranteed to work. This also covers switching an existing
+  // Claude config over to Codex, where CODEX_BINARY was only ever the template placeholder.
+  // A path already made absolute is left alone: the user may have pointed it somewhere on purpose.
+  for (const provider of ["claude", "codex"] as const) {
+    const key = provider === "claude" ? "CLAUDE_BINARY" : "CODEX_BINARY";
+    if (isAbsolute(stringValue(runtime, key, ""))) continue;
+    const detected = provider === "claude" ? detectClaudeBinary() : detectCodexBinary();
+    if (detected) {
+      rendered = patchTomlValue(rendered, "RUNTIME", key, detected);
+    } else if (provider === agent) {
       process.stderr.write(
-        `warning: ${agent} CLI not found — set RUNTIME.${key} in the config once it's installed.\n`,
+        `warning: ${provider} CLI not found — set RUNTIME.${key} in the config once it's installed.\n`,
       );
     }
   }

@@ -5,7 +5,7 @@
   <a href="https://www.npmjs.com/package/@giacomo-ciro/paperino"><img src="https://img.shields.io/badge/npm-%40giacomo--ciro%2Fpaperino-cb3837" alt="npm package"></a>
 </p>
 
-> Every new arXiv paper, every day, filtered by Claude Code or Codex down to what's actually worth your time.
+> Every new arXiv paper, every day, filtered by your agent down to what's actually worth your time.
 
 
 <p align="center">
@@ -38,6 +38,8 @@ Set it up:
 ```
 paperino --configure    # walks you through setup with a few questions
 ```
+
+**Requirements:** [Claude Code](https://claude.com/claude-code) or [Codex](https://developers.openai.com/codex/cli), installed and signed in.
 
 ## Usage
 

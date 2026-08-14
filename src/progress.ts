@@ -75,6 +75,13 @@ class Frame {
   }
 }
 
+// Values line up one column past the longest label.
+const SUMMARY_LABEL_WIDTH = 25;
+
+function summaryLine(label: string, value: string): string {
+  return `${pc.dim(label.padEnd(SUMMARY_LABEL_WIDTH))}${value}`;
+}
+
 const ET_TIME_ZONE = "America/New_York";
 const announcementDateFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: ET_TIME_ZONE,
@@ -126,13 +133,20 @@ export async function confirmRun(
   }
   lines.push("");
   const maxProcessed = maxPapers !== undefined ? String(maxPapers) : "all";
-  lines.push(`${pc.dim("Max papers/announcement")}  ${maxProcessed}`);
+  lines.push(summaryLine("Max papers/announcement", maxProcessed));
   if (!onlyFetch) {
+    lines.push(summaryLine("Agent", cfg.agent));
     lines.push(
-      `${pc.dim("Coarse model")}            ${cfg.coarse.model} (${cfg.coarse.callSize} papers per call, ${cfg.coarse.maxWorkers} concurrent calls at most)`,
+      summaryLine(
+        "Coarse model",
+        `${cfg.coarse.model} (${cfg.coarse.callSize} papers per call, ${cfg.coarse.maxWorkers} concurrent calls at most)`,
+      ),
     );
     lines.push(
-      `${pc.dim("Fine model")}              ${cfg.fine.model} (${cfg.fine.callSize} papers per call, ${cfg.fine.maxWorkers} concurrent calls at most)`,
+      summaryLine(
+        "Fine model",
+        `${cfg.fine.model} (${cfg.fine.callSize} papers per call, ${cfg.fine.maxWorkers} concurrent calls at most)`,
+      ),
     );
   }
   if (force) {
@@ -186,6 +200,13 @@ export function makePipelineView(announcementLabel: string, stageLabels: readonl
     process.stderr.write("\x1b[?25h");
   }
 
+  // A signal terminates the process without emitting "exit", which would leave the
+  // cursor hidden in the user's terminal after a Ctrl-C mid-run. 130 is the shell's
+  // conventional SIGINT status, and exiting explicitly still runs the "exit" handler.
+  function onInterrupt(): void {
+    process.exit(130);
+  }
+
   function renderLine(i: number): string {
     const step = pc.dim(`Step ${i + 1}`);
     if (i < index) {
@@ -212,6 +233,7 @@ export function makePipelineView(announcementLabel: string, stageLabels: readonl
 
   process.stderr.write("\x1b[?25l");
   process.once("exit", showCursor);
+  process.once("SIGINT", onInterrupt);
   process.stderr.write("\n");
   draw();
   timer = setInterval(() => {
@@ -237,6 +259,7 @@ export function makePipelineView(announcementLabel: string, stageLabels: readonl
       stopped = true;
       draw();
       process.off("exit", showCursor);
+      process.off("SIGINT", onInterrupt);
       showCursor();
       process.stderr.write("\n");
     },

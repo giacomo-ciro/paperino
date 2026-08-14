@@ -11,7 +11,11 @@ import type { AgentProvider, Config, EmailConfig, StageConfig } from "./types.js
 export const CONFIG_DIR = join(homedir(), ".paperino");
 export const CONFIG_PATH = join(CONFIG_DIR, "config.toml");
 
-const ALLOWED_MODELS = ["fable", "opus", "sonnet", "haiku"];
+/** The models each provider may be pointed at. Single source of truth for the wizard too. */
+export const AGENT_MODELS: Record<AgentProvider, string[]> = {
+  claude: ["fable", "opus", "sonnet", "haiku"],
+  codex: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+};
 const AGENT_PROVIDERS: AgentProvider[] = ["claude", "codex"];
 const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -80,6 +84,13 @@ export function ensureConfig(configPath: string = CONFIG_PATH): void {
     if (runtime.MAX_WORKERS === undefined && typeof coarse.MAX_WORKERS === "number") {
       updated = patchTomlValue(updated, "RUNTIME", "MAX_WORKERS", coarse.MAX_WORKERS);
       updated = removeTomlValue(removeTomlValue(updated, "STAGES.COARSE", "MAX_WORKERS"), "STAGES.FINE", "MAX_WORKERS");
+    }
+    // A key filled from the template arrives as the bare command name; resolve it the way a
+    // fresh config does, so a config migrated onto codex still resolves under cron's PATH.
+    for (const [key, detect] of [["CLAUDE_BINARY", detectClaudeBinary], ["CODEX_BINARY", detectCodexBinary]] as const) {
+      if (runtime[key] !== undefined) continue;
+      const detected = detect();
+      if (detected) updated = patchTomlValue(updated, "RUNTIME", key, detected);
     }
     updated = addMissingDefaults(updated, parse(updated) as Record<string, unknown>, defaults);
     if (updated !== source) writeFileSync(configPath, updated, "utf-8");
@@ -183,6 +194,17 @@ class ConfigErrorCollector {
     }
   }
 
+  /**
+   * Binary path already extracted; if it's absolute, confirm it still exists. Version
+   * managers move these when Node is upgraded, and without this the run fails one spawn
+   * at a time — burning every retry before producing an empty digest. A bare command name
+   * is left to resolve against PATH at spawn time.
+   */
+  existingBinary(value: string, label: string): void {
+    if (value === "" || !isAbsolute(value) || existsSync(value)) return;
+    this.add(`"${label}" no longer exists: ${value}`);
+  }
+
   /** String already extracted via `.nonEmptyString()`; checks it's one of `allowed`. */
   oneOf(value: string, allowed: string[], label: string): void {
     if (value !== "" && !allowed.includes(value)) {
@@ -234,7 +256,7 @@ class ConfigErrorCollector {
     const stage = this.table(stages, key, label);
 
     const model = this.nonEmptyString(stage, "MODEL", `${label}.MODEL`);
-    if (agent === "claude") this.oneOf(model, ALLOWED_MODELS, `${label}.MODEL`);
+    this.oneOf(model, AGENT_MODELS[agent], `${label}.MODEL`);
 
     const callSize = this.number(stage, "CALL_SIZE", `${label}.CALL_SIZE`);
     this.numberSatisfies(callSize, `${label}.CALL_SIZE`, (n) => n > 0, "must be a positive number");
@@ -327,10 +349,16 @@ export function loadConfig(configPath: string = CONFIG_PATH): Config {
     }
   }
 
+  const claudeBinary = errors.nonEmptyString(runtime, "CLAUDE_BINARY", "RUNTIME.CLAUDE_BINARY");
+  const codexBinary = errors.nonEmptyString(runtime, "CODEX_BINARY", "RUNTIME.CODEX_BINARY");
+  // Only the agent actually in use has to resolve — the other CLI may simply not be installed.
+  if (agent === "claude") errors.existingBinary(claudeBinary, "RUNTIME.CLAUDE_BINARY");
+  else errors.existingBinary(codexBinary, "RUNTIME.CODEX_BINARY");
+
   const config: Config = {
     agent,
-    claudeBinary: errors.nonEmptyString(runtime, "CLAUDE_BINARY", "RUNTIME.CLAUDE_BINARY"),
-    codexBinary: errors.nonEmptyString(runtime, "CODEX_BINARY", "RUNTIME.CODEX_BINARY"),
+    claudeBinary,
+    codexBinary,
     callTimeoutMs: callTimeoutSeconds * 1000,
     callRetries,
     arxivCat,

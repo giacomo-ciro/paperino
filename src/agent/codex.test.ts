@@ -42,9 +42,10 @@ describe("CodexAgent", () => {
         const fs = require("node:fs");
         const args = process.argv.slice(2);
         const valueAfter = (flag) => args[args.indexOf(flag) + 1];
-        const required = ["exec", "--json", "--ephemeral", "--skip-git-repo-check"];
+        const required = ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config"];
         if (!required.every((arg) => args.includes(arg))) process.exit(20);
         if (valueAfter("--sandbox") !== "read-only") process.exit(21);
+        if (valueAfter("--disable") !== "shell_tool") process.exit(25);
         if (valueAfter("--color") !== "never") process.exit(22);
         if (valueAfter("--model") !== "gpt-5.6-luna") process.exit(23);
         const schema = JSON.parse(fs.readFileSync(valueAfter("--output-schema"), "utf-8"));
